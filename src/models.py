@@ -45,9 +45,7 @@ class GCN(nn.Module):
             nn.ReLU(),
             nn.Linear(out_dim >> 1, out_dim >> 2),
             nn.ReLU(),
-            nn.Linear(out_dim >> 2, out_dim >> 3),
-            nn.ReLU(),
-            nn.Linear(out_dim >> 3, n_classes),
+            nn.Linear(out_dim >> 2, n_classes),
         )
 
     def forward(self, x, edge_index, batch):
@@ -57,6 +55,7 @@ class GCN(nn.Module):
 
         h = self.MLP_layer(h)
 
+        # NOTE: WHY???
         h = global_mean_pool(h, batch)
         return h
 

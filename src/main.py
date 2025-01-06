@@ -1,12 +1,14 @@
 import argparse
-from os import makedirs
 import csv
+import random
+from os import makedirs
 
+import numpy as np
 import torch
-from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import GNNBenchmarkDataset
-# from torch.utils.tensorboard import SummaryWriter
+from torch_geometric.loader import DataLoader
 
+# from torch.utils.tensorboard import SummaryWriter
 from models import GCN, SimpleGCN
 
 DATASET_DIR = "./datasets"
@@ -28,13 +30,15 @@ DATASETS = [
 
 def write_results(
     filename: str,
-    epoch: int,
-    train_loss: float,
-    valid_loss: float,
+    epoch: int = None,
+    train_loss: float = None,
+    valid_loss: float = None,
+    valid_acc: float = None,
+    test_acc: float = None,
 ):
     with open(f"results/{filename}", "a") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow([epoch, train_loss, valid_loss])
+        writer.writerow([epoch, train_loss, valid_loss, valid_acc, test_acc])
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -42,7 +46,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument("-v", action="store_true")  # verbose
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
-    parser.add_argument("-dataset", choices=DATASETS, default="MNIST")
+    parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
 
     parser.add_argument("-seed", type=int, default=42)
 
@@ -56,6 +60,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def train(
+    name: str,
     model: torch.nn.Module,
     trainloader: DataLoader,
     validloader: DataLoader,
@@ -75,7 +80,6 @@ def train(
     )
 
     model.to(device)
-    model_name = type(model).__name__
 
     for epoch in range(epochs):
         train_loss = 0
@@ -98,10 +102,13 @@ def train(
 
         train_loss /= len(trainloader)
 
-        torch.save(model.state_dict(), f"saves/training_{model_name}_{epoch:03}.pt")
+        if epoch == epochs - 1:
+            torch.save(model.state_dict(), f"saves/training_{name}_{epoch:03}.pt")
 
         # Validation
         valid_loss = 0
+        correct = 0
+        total = 0
         model.eval()
         with torch.no_grad():
             for data in validloader:
@@ -113,18 +120,24 @@ def train(
 
                 out = model(x, edge_index, batch)
                 loss = model.loss(out, y)
-
                 valid_loss += loss.detach().item()
+
+                # Validation accuracy
+                pred = out.argmax(dim=1)  # Predicted labels
+                correct += (pred == y).sum().item()
+                total += y.size(0)
+
         valid_loss /= len(validloader)
 
         scheduler.step(valid_loss)
-        print(f"{model_name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+        # print(f"{name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
 
         write_results(
-            f"{model_name}.csv",
-            epoch,
-            train_loss,
-            valid_loss,
+            f"{name}.csv",
+            epoch=epoch,
+            train_loss=train_loss,
+            valid_loss=valid_loss,
+            valid_acc=correct / total,
         )
 
 
@@ -134,13 +147,18 @@ def main():
     makedirs("saves", exist_ok=True)
     makedirs("results", exist_ok=True)
 
-    torch.manual_seed(args.seed)
-
-    # NOTE:
+    # HACK:
     if not torch.cuda.is_available():
         raise Exception("No CUDA detected.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # setting seeds
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed(args.seed)
 
     torch.backends.cudnn.benchmark = False
 
@@ -149,7 +167,7 @@ def main():
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
 
     validset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="val")
-    validloader = DataLoader(validset, batch_size=args.batch, shuffle=True)
+    validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
 
     model = MODELS[args.model](
         in_dim=trainset.num_node_features,
@@ -158,7 +176,10 @@ def main():
         n_classes=trainset.num_classes,
     )
 
+    name = f"{type(model).__name__}_seed{args.seed}_wd{args.weight_decay}"
+
     train(
+        name,
         model,
         trainloader,
         validloader,
@@ -169,7 +190,7 @@ def main():
     )
 
     testset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="test")
-    testloader = DataLoader(testset, batch_size=args.batch, shuffle=True)
+    testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
     # model.load_state_dict(torch.load("saves/training_SimpleGCN_099.pt", device))
     # model.to(device)
@@ -181,16 +202,23 @@ def main():
     with torch.no_grad():
         for data in testloader:
             x = data.x.to(device)
+            y = data.y.to(device)
+
             edge_index = data.edge_index.to(device)
             batch = data.batch.to(device)
 
             out = model(x, edge_index, batch)
             pred = out.argmax(dim=1)  # Predicted labels
 
-            correct += (pred == data.y).sum().item()
-            total += data.y.size(0)
+            correct += (pred == y).sum().item()
+            total += y.size(0)
 
-    print(f"Accuracy: {correct / total}")
+    print(f"{name} Accuracy: {correct / total}")
+
+    write_results(
+        f"{name}.csv",
+        test_acc=correct / total,
+    )
 
 
 if __name__ == "__main__":
