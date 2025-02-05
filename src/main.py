@@ -5,6 +5,7 @@ from os import makedirs
 
 import numpy as np
 import torch
+from torch_geometric.data import Data
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
@@ -30,11 +31,11 @@ DATASETS = [
 
 def write_results(
     filename: str,
-    epoch: int = None,
-    train_loss: float = None,
-    valid_loss: float = None,
-    valid_acc: float = None,
-    test_acc: float = None,
+    epoch=None,
+    train_loss=None,
+    valid_loss=None,
+    valid_acc=None,
+    test_acc=None,
 ):
     with open(f"results/{filename}", "a") as csvfile:
         writer = csv.writer(csvfile)
@@ -76,7 +77,6 @@ def train(
         mode="min",
         factor=0.5,
         patience=5,
-        verbose=True,
     )
 
     model.to(device)
@@ -141,6 +141,12 @@ def train(
         )
 
 
+def position_transform(data: Data):
+    """Concatenates features and position"""
+    data.x = torch.cat((torch.Tensor(data.x), torch.Tensor(data.pos)), 1)
+    return data
+
+
 def main():
     args = parse_arguments()
 
@@ -163,14 +169,32 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     # Data Prep
-    trainset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="train")
+    trainset = GNNBenchmarkDataset(
+        root=DATASET_DIR,
+        name=args.dataset,
+        split="train",
+        pre_transform=position_transform,
+        # force_reload=True,
+    )
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
 
-    validset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="val")
+    # data = next(iter(trainloader))
+    # print(data.x[:10])
+    # print(data.y[:10])
+    # print(trainset.num_features)
+    # return
+
+    validset = GNNBenchmarkDataset(
+        root=DATASET_DIR,
+        name=args.dataset,
+        split="val",
+        pre_transform=position_transform,
+        # force_reload=True,
+    )
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
 
     model = MODELS[args.model](
-        in_dim=trainset.num_node_features,
+        in_dim=trainset.num_features,
         hidden_dim=146,
         out_dim=146,
         n_classes=trainset.num_classes,
@@ -189,7 +213,13 @@ def main():
         args.weight_decay,
     )
 
-    testset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="test")
+    testset = GNNBenchmarkDataset(
+        root=DATASET_DIR,
+        name=args.dataset,
+        split="test",
+        pre_transform=position_transform,
+        # force_reload=True,
+    )
     testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
     # model.load_state_dict(torch.load("saves/training_SimpleGCN_099.pt", device))
