@@ -3,7 +3,6 @@ name = "GNN-decomp"
 version = "0.1.0"
 description = ""
 authors = ["ShadowDragon5 <lauriuskas@gmail.com>"]
-# package-mode = false
 packages = [
 	{ include = "src" }
 ]
@@ -12,12 +11,11 @@ packages = [
 [tool.poetry.dependencies]
 python = "^3.10"
 torch-geometric = "^2.6.1"
-# torch = "2.5.0"
-torch = { version = "*", optional = true }
+torch = "2.5.0"
 scipy = "^1.14.1"
 pyg-lib = [
-	{ git = "https://github.com/pyg-team/pyg-lib.git", markers = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
-	{version = "^0.4.0", source = "pyg-lib-src", markers = "platform_system == 'Linux' and platform_machine == 'x86_64'"}
+	# { git = "https://github.com/pyg-team/pyg-lib.git", markers = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
+	{ version = "^0.4.0", source = "pyg-lib-src", markers = "platform_system == 'Linux' and platform_machine == 'x86_64'" }
 ]
 
 
