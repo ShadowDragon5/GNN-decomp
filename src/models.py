@@ -53,10 +53,10 @@ class GCN(nn.Module):
 
         h = self.conv(h, edge_index)
 
-        h = self.MLP_layer(h)
-
-        # NOTE: WHY???
+        # per node features [n, f] -> graph features [n_batches, f]
         h = global_mean_pool(h, batch)
+
+        h = self.MLP_layer(h)
         return h
 
     def loss(self, pred, label):
@@ -78,7 +78,6 @@ class SimpleGCN(nn.Module):
                 (GCNConv(hidden_dim, hidden_dim), "x, edge_index -> x"),
                 nn.ReLU(inplace=True),
                 (GCNConv(hidden_dim, n_classes), "x, edge_index -> x"),
-                # nn.Softmax(dim=1),
             ],
         )
 

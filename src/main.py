@@ -1,21 +1,31 @@
 import argparse
-import csv
 import random
+from logging import warning
 from os import makedirs
+from pathlib import Path
 
+# from torch_geometric.distributed import Partitioner
+# from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import torch
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
-# from torch.utils.tensorboard import SummaryWriter
 from models import GCN, SimpleGCN
+from pipelines.accumulating import train as accum_train
+from pipelines.batched import train as batched_train
+from utils import position_transform
 
-DATASET_DIR = "./datasets"
+DATASET_DIR = Path("./datasets")
 
 MODELS = {
     "GCN": GCN,
     "Simple": SimpleGCN,
+}
+
+PIPELINES = {
+    "batched": batched_train,
+    "accumulating": accum_train,
 }
 
 DATASETS = [
@@ -28,25 +38,14 @@ DATASETS = [
 ]
 
 
-def write_results(
-    filename: str,
-    epoch: int = None,
-    train_loss: float = None,
-    valid_loss: float = None,
-    valid_acc: float = None,
-    test_acc: float = None,
-):
-    with open(f"results/{filename}", "a") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([epoch, train_loss, valid_loss, valid_acc, test_acc])
-
-
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-v", action="store_true")  # verbose
+    parser.add_argument("-q", action="store_true")  # quiet
+    parser.add_argument("-u", action="store_true")  # update data
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
+    parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
 
@@ -59,86 +58,52 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def train(
-    name: str,
-    model: torch.nn.Module,
-    trainloader: DataLoader,
-    validloader: DataLoader,
-    device,
-    epochs: int,
-    lr: float,
-    weight_decay: float,
-):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+"""
+dont abstact prematurely!
+pipelines.batched
+pipelines.accumulating
+pipelines.accumulating_partitioned
+...
+"""
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=5,
-        verbose=True,
+
+def load_data(dataset: str, preprocessing, reload: bool):
+    trainset = GNNBenchmarkDataset(
+        root=str(DATASET_DIR),
+        name=dataset,
+        split="train",
+        pre_transform=preprocessing,
+        force_reload=reload,
     )
 
-    model.to(device)
+    validset = GNNBenchmarkDataset(
+        root=str(DATASET_DIR),
+        name=dataset,
+        split="val",
+        pre_transform=preprocessing,
+        force_reload=reload,
+    )
 
-    for epoch in range(epochs):
-        train_loss = 0
-        model.train()
-        for data in trainloader:
-            x = data.x.to(device)
-            y = data.y.to(device)
+    testset = GNNBenchmarkDataset(
+        root=str(DATASET_DIR),
+        name=dataset,
+        split="test",
+        pre_transform=preprocessing,
+        force_reload=reload,
+    )
 
-            edge_index = data.edge_index.to(device)
-            batch = data.batch.to(device)
+    return trainset, validset, testset
 
-            optimizer.zero_grad()
-            out = model(x, edge_index, batch)
-            loss = model.loss(out, y)
 
-            train_loss += loss.detach().item()
+# print(trainset[0].edge_attr)
 
-            loss.backward()
-            optimizer.step()
+# partitioner = Partitioner(
+#     trainset._data,
+#     num_parts=2,
+#     root=DATASET_DIR / "partition",
+# )
 
-        train_loss /= len(trainloader)
-
-        if epoch == epochs - 1:
-            torch.save(model.state_dict(), f"saves/training_{name}_{epoch:03}.pt")
-
-        # Validation
-        valid_loss = 0
-        correct = 0
-        total = 0
-        model.eval()
-        with torch.no_grad():
-            for data in validloader:
-                x = data.x.to(device)
-                y = data.y.to(device)
-
-                edge_index = data.edge_index.to(device)
-                batch = data.batch.to(device)
-
-                out = model(x, edge_index, batch)
-                loss = model.loss(out, y)
-                valid_loss += loss.detach().item()
-
-                # Validation accuracy
-                pred = out.argmax(dim=1)  # Predicted labels
-                correct += (pred == y).sum().item()
-                total += y.size(0)
-
-        valid_loss /= len(validloader)
-
-        scheduler.step(valid_loss)
-        # print(f"{name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
-
-        write_results(
-            f"{name}.csv",
-            epoch=epoch,
-            train_loss=train_loss,
-            valid_loss=valid_loss,
-            valid_acc=correct / total,
-        )
+# partitioner.generate_partition()
 
 
 def main():
@@ -147,9 +112,8 @@ def main():
     makedirs("saves", exist_ok=True)
     makedirs("results", exist_ok=True)
 
-    # HACK:
     if not torch.cuda.is_available():
-        raise Exception("No CUDA detected.")
+        warning("No CUDA detected.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -162,15 +126,19 @@ def main():
 
     torch.backends.cudnn.benchmark = False
 
-    # Data Prep
-    trainset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="train")
+    trainset, validset, testset = load_data(args.dataset, position_transform, args.u)
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
-
-    validset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="val")
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
+    testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
+
+    # data = next(iter(trainloader))
+    # print(data.x[:10])
+    # print(data.y[:10])
+    # print(trainset.num_features)
+    # return
 
     model = MODELS[args.model](
-        in_dim=trainset.num_node_features,
+        in_dim=trainset.num_features,
         hidden_dim=146,
         out_dim=146,
         n_classes=trainset.num_classes,
@@ -178,48 +146,25 @@ def main():
 
     name = f"{type(model).__name__}_seed{args.seed}_wd{args.weight_decay}"
 
-    train(
+    PIPELINES[args.pipeline](
         name,
         model,
         trainloader,
         validloader,
+        testloader,
         device,
         args.epochs,
         args.lr,
         args.weight_decay,
+        args.q,
     )
-
-    testset = GNNBenchmarkDataset(root=DATASET_DIR, name=args.dataset, split="test")
-    testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
     # model.load_state_dict(torch.load("saves/training_SimpleGCN_099.pt", device))
     # model.to(device)
 
-    model.eval()
-
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data in testloader:
-            x = data.x.to(device)
-            y = data.y.to(device)
-
-            edge_index = data.edge_index.to(device)
-            batch = data.batch.to(device)
-
-            out = model(x, edge_index, batch)
-            pred = out.argmax(dim=1)  # Predicted labels
-
-            correct += (pred == y).sum().item()
-            total += y.size(0)
-
-    print(f"{name} Accuracy: {correct / total}")
-
-    write_results(
-        f"{name}.csv",
-        test_acc=correct / total,
-    )
-
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Stopping...")
