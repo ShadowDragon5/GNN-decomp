@@ -14,13 +14,20 @@ from torch_geometric.loader import DataLoader
 from models import GCN, SimpleGCN
 from pipelines.accumulating import train as accum_train
 from pipelines.batched import train as batched_train
-from utils import position_transform, write_results
+from pipelines.full_pass import train as full_train
+from utils import position_transform
 
 DATASET_DIR = Path("./datasets")
 
 MODELS = {
     "GCN": GCN,
     "Simple": SimpleGCN,
+}
+
+PIPELINES = {
+    "batched": batched_train,
+    "accumulating": accum_train,
+    "full": full_train,
 }
 
 DATASETS = [
@@ -40,6 +47,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("-u", action="store_true")  # update data
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
+    parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
 
@@ -59,28 +67,6 @@ pipelines.accumulating
 pipelines.accumulating_partitioned
 ...
 """
-
-
-def test(model, testloader, device) -> float:
-    model.eval()
-
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data in testloader:
-            x = data.x.to(device)
-            y = data.y.to(device)
-
-            edge_index = data.edge_index.to(device)
-            batch = data.batch.to(device)
-
-            out = model(x, edge_index, batch)
-            pred = out.argmax(dim=1)  # Predicted labels
-
-            correct += (pred == y).sum().item()
-            total += y.size(0)
-
-    return correct / total
 
 
 def load_data(dataset: str, preprocessing, reload: bool):
@@ -162,22 +148,12 @@ def main():
 
     name = f"{type(model).__name__}_seed{args.seed}_wd{args.weight_decay}"
 
-    # batched_train(
-    #     name,
-    #     model,
-    #     trainloader,
-    #     validloader,
-    #     device,
-    #     args.epochs,
-    #     args.lr,
-    #     args.weight_decay,
-    # )
-
-    accum_train(
+    PIPELINES[args.pipeline](
         name,
         model,
         trainloader,
         validloader,
+        testloader,
         device,
         args.epochs,
         args.lr,
@@ -187,13 +163,6 @@ def main():
 
     # model.load_state_dict(torch.load("saves/training_SimpleGCN_099.pt", device))
     # model.to(device)
-
-    accuracy = test(model, testloader, device)
-    print(f"{name} Accuracy: {accuracy}")
-    write_results(
-        f"{name}_acc.csv",
-        test_acc=accuracy,
-    )
 
 
 if __name__ == "__main__":

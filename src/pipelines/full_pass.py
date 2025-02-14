@@ -1,5 +1,5 @@
 """
-Full graph, gradient accumulation variation
+Full graph, whole dataset
 """
 
 import torch
@@ -30,6 +30,11 @@ def train(
         factor=0.5,
         patience=5,
     )
+
+    # HACK
+    trainloader = DataLoader(trainloader.dataset, batch_size=len(trainloader.dataset))
+    validloader = DataLoader(validloader.dataset, batch_size=len(validloader.dataset))
+    testloader = DataLoader(testloader.dataset, batch_size=len(testloader.dataset))
 
     model.to(device)
 
@@ -63,7 +68,7 @@ def train(
         train_loss /= len(trainloader)
 
         if epoch == epochs - 1:
-            torch.save(model.state_dict(), f"saves/training_acc_{name}_{epoch:03}.pt")
+            torch.save(model.state_dict(), f"saves/training_full_{name}_{epoch:03}.pt")
 
         # Validation
         valid_loss = 0
@@ -95,7 +100,7 @@ def train(
             print(f"{name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
 
         write_results(
-            f"{name}_acc.csv",
+            f"{name}_full.csv",
             epoch=epoch,
             train_loss=train_loss,
             valid_loss=valid_loss,
@@ -105,6 +110,6 @@ def train(
     accuracy = test(model, testloader, device)
     print(f"{name} Accuracy: {accuracy}")
     write_results(
-        f"{name}_acc.csv",
+        f"{name}_full.csv",
         test_acc=accuracy,
     )

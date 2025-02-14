@@ -7,6 +7,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
+from pipelines.shared import test
 from utils import write_results
 
 
@@ -15,10 +16,12 @@ def train(
     model: torch.nn.Module,
     trainloader: DataLoader,
     validloader: DataLoader,
+    testloader: DataLoader,
     device,
     epochs: int,
     lr: float,
     weight_decay: float,
+    quiet: bool = False,
 ):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -34,8 +37,13 @@ def train(
     for epoch in range(epochs):
         train_loss = 0
         model.train()
-        # TODO: disable tqdm if quiet flag set
-        for data in tqdm(trainloader, desc=f"Epoch: {epoch:02}", dynamic_ncols=True):
+
+        for data in tqdm(
+            trainloader,
+            desc=f"Epoch: {epoch:02}",
+            dynamic_ncols=True,
+            disable=quiet,
+        ):
             x = data.x.to(device)
             y = data.y.to(device)
 
@@ -81,7 +89,9 @@ def train(
         valid_loss /= len(validloader)
 
         scheduler.step(valid_loss)
-        print(f"{name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+
+        if not quiet:
+            print(f"{name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
 
         write_results(
             f"{name}.csv",
@@ -90,3 +100,10 @@ def train(
             valid_loss=valid_loss,
             valid_acc=correct / total,
         )
+
+    accuracy = test(model, testloader, device)
+    print(f"{name} Accuracy: {accuracy}")
+    write_results(
+        f"{name}.csv",
+        test_acc=accuracy,
+    )
