@@ -191,7 +191,7 @@ def main():
     accuracy = test(model, testloader, device)
     print(f"{name} Accuracy: {accuracy}")
     write_results(
-        f"{name}.csv",
+        f"{name}_acc.csv",
         test_acc=accuracy,
     )
 
