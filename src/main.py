@@ -14,7 +14,6 @@ from torch_geometric.loader import DataLoader
 from models import GCN, SimpleGCN
 from pipelines.accumulating import train as accum_train
 from pipelines.batched import train as batched_train
-from pipelines.full_pass import train as full_train
 from utils import position_transform
 
 DATASET_DIR = Path("./datasets")
@@ -27,7 +26,6 @@ MODELS = {
 PIPELINES = {
     "batched": batched_train,
     "accumulating": accum_train,
-    "full": full_train,
 }
 
 DATASETS = [

@@ -1,5 +1,6 @@
 """
 Full graph, whole dataset
+ERROR: not enough VRAM to run
 """
 
 import torch
@@ -59,13 +60,10 @@ def train(
 
             train_loss += loss.detach().item()
 
-            loss = loss / len(trainloader)
             loss.backward()
 
         optimizer.step()
         optimizer.zero_grad()
-
-        train_loss /= len(trainloader)
 
         if epoch == epochs - 1:
             torch.save(model.state_dict(), f"saves/training_full_{name}_{epoch:03}.pt")
