@@ -42,7 +42,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-q", action="store_true")  # quiet
-    parser.add_argument("-u", action="store_true")  # update data
+    parser.add_argument("-u", action="store_true")  # re-generate data
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
     parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
@@ -56,15 +56,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("-weight_decay", type=float, default=5e-4)
 
     return parser.parse_args()
-
-
-"""
-dont abstact prematurely!
-pipelines.batched
-pipelines.accumulating
-pipelines.accumulating_partitioned
-...
-"""
 
 
 def load_data(dataset: str, preprocessing, reload: bool):
