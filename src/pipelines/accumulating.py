@@ -6,7 +6,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from pipelines.shared import test
+from pipelines.common import test
 from utils import write_results
 
 
@@ -62,8 +62,8 @@ def train(
 
         train_loss /= len(trainloader)
 
-        if epoch == epochs - 1:
-            torch.save(model.state_dict(), f"saves/training_acc_{name}_{epoch:03}.pt")
+        # if epoch == epochs - 1:
+        #     torch.save(model.state_dict(), f"saves/training_acc_{name}_{epoch:03}.pt")
 
         # Validation
         valid_loss = 0
@@ -103,7 +103,9 @@ def train(
         )
 
     accuracy = test(model, testloader, device)
-    print(f"{name} Accuracy: {accuracy}")
+    if not quiet:
+        print(f"{name} Accuracy: {accuracy}")
+
     write_results(
         f"{name}_acc.csv",
         test_acc=accuracy,

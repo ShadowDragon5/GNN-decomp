@@ -7,7 +7,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from pipelines.shared import test
+from pipelines.common import test
 from utils import write_results
 
 
