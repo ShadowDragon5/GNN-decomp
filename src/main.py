@@ -4,8 +4,7 @@ from logging import warning
 from os import makedirs
 from pathlib import Path
 
-# from torch_geometric.distributed import Partitioner
-# from torch.utils.tensorboard import SummaryWriter
+import mlflow
 import numpy as np
 import torch
 from torch_geometric.datasets import GNNBenchmarkDataset
@@ -24,8 +23,8 @@ MODELS = {
 }
 
 PIPELINES = {
-    "batched": batched_train,
-    "accumulating": accum_train,
+    "batched": batched_train,  # baseline
+    "accumulating": accum_train,  # baseline with gradient accumulation
 }
 
 DATASETS = [
@@ -86,17 +85,6 @@ def load_data(dataset: str, preprocessing, reload: bool):
     return trainset, validset, testset
 
 
-# print(trainset[0].edge_attr)
-
-# partitioner = Partitioner(
-#     trainset._data,
-#     num_parts=2,
-#     root=DATASET_DIR / "partition",
-# )
-
-# partitioner.generate_partition()
-
-
 def main():
     args = parse_arguments()
 
@@ -122,12 +110,6 @@ def main():
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
     testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
-    # data = next(iter(trainloader))
-    # print(data.x[:10])
-    # print(data.y[:10])
-    # print(trainset.num_features)
-    # return
-
     model = MODELS[args.model](
         in_dim=trainset.num_features,
         hidden_dim=146,
@@ -137,21 +119,36 @@ def main():
 
     name = f"{type(model).__name__}_seed{args.seed}_wd{args.weight_decay}"
 
-    PIPELINES[args.pipeline](
-        name,
-        model,
-        trainloader,
-        validloader,
-        testloader,
-        device,
-        args.epochs,
-        args.lr,
-        args.weight_decay,
-        args.q,
-    )
+    params = {
+        "epochs": args.epochs,
+        "lr": args.lr,
+        "weight_decay": args.weight_decay,
+    }
 
-    # model.load_state_dict(torch.load("saves/training_SimpleGCN_099.pt", device))
-    # model.to(device)
+    mlflow.set_experiment("/graph-partitioning")
+    with mlflow.start_run(run_name=name):
+        mlflow.log_params(
+            {
+                "seed": args.seed,
+                "pipeline": args.pipeline,
+                "model": args.model,
+                "dataset": args.dataset,
+                "batch": args.batch,
+                **params,
+            }
+        )
+        PIPELINES[args.pipeline](
+            name,
+            model,
+            trainloader,
+            validloader,
+            testloader,
+            device,
+            **params,
+            quiet=args.q,
+        )
+
+        mlflow.pytorch.log_model(model, name)
 
 
 if __name__ == "__main__":

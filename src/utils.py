@@ -1,5 +1,6 @@
 import csv
 
+import mlflow
 import torch
 from torch_geometric.data import Data
 
@@ -23,6 +24,18 @@ def write_results(
     valid_acc=None,
     test_acc=None,
 ):
+    if train_loss and valid_loss and valid_acc:
+        mlflow.log_metrics(
+            {
+                "train/loss": train_loss,
+                "validate/loss": valid_loss,
+                "validate/accuracy": valid_acc,
+            },
+            step=epoch,
+        )
+    if test_acc:
+        mlflow.log_metric("test/accuracy", test_acc)
+
     with open(f"results/{filename}", "a") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([epoch, train_loss, valid_loss, valid_acc, test_acc])
