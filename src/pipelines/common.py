@@ -1,23 +1,58 @@
+from abc import ABC, abstractmethod
+
 import torch
+from torch_geometric.loader import DataLoader
 
 
-def test(model, testloader, device) -> float:
-    model.eval()
+class Pipeline(ABC):
+    """A wrapper to unify pipeline signature"""
 
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data in testloader:
-            x = data.x.to(device)
-            y = data.y.to(device)
+    def __init__(
+        self,
+        name: str,
+        model: torch.nn.Module,
+        trainloader: DataLoader,
+        validloader: DataLoader,
+        testloader: DataLoader,
+        device: torch.device,
+        epochs: int,
+        lr: float,
+        weight_decay: float,
+        quiet: bool = False,
+        **_,
+    ) -> None:
+        self.name = name
+        self.model = model
+        self.trainloader = trainloader
+        self.validloader = validloader
+        self.testloader = testloader
+        self.device = device
+        self.epochs = epochs
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.quiet = quiet
 
-            edge_index = data.edge_index.to(device)
-            batch = data.batch.to(device)
+    @abstractmethod
+    def run(self) -> None:
+        pass
 
-            out = model(x, edge_index, batch)
-            pred = out.argmax(dim=1)  # Predicted labels
+    def test(self) -> float:
+        self.model.eval()
 
-            correct += (pred == y).sum().item()
-            total += y.size(0)
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data in self.testloader:
+                x = data.x.to(self.device)
+                y = data.y.to(self.device)
 
-    return correct / total
+                edge_index = data.edge_index.to(self.device)
+                batch = data.batch.to(self.device)
+
+                out = self.model(x, edge_index, batch)
+                pred = out.argmax(dim=1)  # Predicted labels
+
+                correct += (pred == y).sum().item()
+                total += y.size(0)
+
+        return correct / total

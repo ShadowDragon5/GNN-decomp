@@ -3,6 +3,7 @@ import random
 from logging import warning
 from os import makedirs
 from pathlib import Path
+from typing import Type
 
 import mlflow
 import numpy as np
@@ -11,8 +12,9 @@ from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
 from models import GCN, SimpleGCN
-from pipelines.accumulating import train as accum_train
-from pipelines.batched import train as batched_train
+from pipelines.accumulating import Accumulating
+from pipelines.batched import Batched
+from pipelines.common import Pipeline
 from utils import position_transform
 
 DATASET_DIR = Path("./datasets")
@@ -22,9 +24,9 @@ MODELS = {
     "Simple": SimpleGCN,
 }
 
-PIPELINES = {
-    "batched": batched_train,  # baseline
-    "accumulating": accum_train,  # baseline with gradient accumulation
+PIPELINES: dict[str, Type[Pipeline]] = {
+    "batched": Batched,  # baseline
+    "accumulating": Accumulating,  # baseline with gradient accumulation
 }
 
 DATASETS = [
@@ -40,8 +42,12 @@ DATASETS = [
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-q", action="store_true")  # quiet
-    parser.add_argument("-u", action="store_true")  # re-generate data
+    parser.add_argument("-q", action="store_true", help="supress stdout")
+    parser.add_argument(
+        "-u",
+        action="store_true",
+        help="force re-generate dataset files",
+    )
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
     parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
@@ -51,7 +57,13 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("-batch", type=int, default=128)
     parser.add_argument("-epochs", type=int, default=100)
 
-    parser.add_argument("-lr", type=float, default=0.001)
+    parser.add_argument("-lr", type=float, default=0.001, help="learning rate")
+    parser.add_argument(
+        "-pre_lr",
+        type=float,
+        default=0.001,
+        help="preconditioner learning rate (only for 'pre-' pipelines)",
+    )
     parser.add_argument("-weight_decay", type=float, default=5e-4)
 
     return parser.parse_args()
@@ -117,11 +129,12 @@ def main():
         n_classes=trainset.num_classes,
     )
 
-    name = f"{type(model).__name__}_seed{args.seed}_wd{args.weight_decay}"
+    name = f"{type(model).__name__}_seed{args.seed}_lr{args.lr}_prec_lr{args.pre_lr}"
 
     params = {
         "epochs": args.epochs,
         "lr": args.lr,
+        "pre_lr": args.pre_lr,
         "weight_decay": args.weight_decay,
     }
 
@@ -138,15 +151,15 @@ def main():
             }
         )
         PIPELINES[args.pipeline](
-            name,
-            model,
-            trainloader,
-            validloader,
-            testloader,
-            device,
-            **params,
+            name=name,
+            model=model,
+            trainloader=trainloader,
+            validloader=validloader,
+            testloader=testloader,
+            device=device,
             quiet=args.q,
-        )
+            **params,
+        ).run()
 
         mlflow.pytorch.log_model(model, name)
 

@@ -13,8 +13,10 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+        venvDir = ".venv";
       in
       {
+        # `nix develop`
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
             python3
@@ -27,9 +29,11 @@
           ];
           shellHook = ''
             export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib.outPath}/lib:${pkgs.pythonManylinuxPackages.manylinux2014Package}/lib:$LD_LIBRARY_PATH";
-            test -d .venv || ${pkgs.python3.interpreter} -m venv .venv
-            source .venv/bin/activate
-            pip install -r requirements.txt | grep -v 'already satisfied'
+            if ![ -d "${venvDir}" ]; then
+              ${pkgs.python3.interpreter} -m venv "${venvDir}"
+              pip install -r requirements.txt | grep -v 'already satisfied'
+            fi
+            source "${venvDir}/bin/activate"
           '';
         };
       }
