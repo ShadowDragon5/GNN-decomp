@@ -1,3 +1,5 @@
-datasets
-saves
+datasets/
+saves/
 __pycache__/
+.venv/
+mlruns/
