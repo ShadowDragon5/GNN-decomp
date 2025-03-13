@@ -182,6 +182,7 @@ def main():
         l_name = name + f"_lr{params['lr']}_prec_lr{params['pre_lr']}"
         print(l_name)
         with mlflow.start_run(run_name=l_name, nested=True):
+            mlflow.log_params(params)
             loss = PIPELINES[args.pipeline](
                 name=l_name,
                 model=model,
