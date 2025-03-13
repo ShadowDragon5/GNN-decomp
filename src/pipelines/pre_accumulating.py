@@ -12,14 +12,16 @@ class PreAccumulating(Pipeline):
     def __init__(
         self,
         pre_epochs: int,
-        part_trainloaders: list[DataLoader],
+        part_trainloader: DataLoader,
+        num_parts: int,
         pre_lr: float,
         pre_wd: float,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.pre_epochs = pre_epochs
-        self.part_trainloaders = part_trainloaders
+        self.num_parts = num_parts
+        self.part_trainloader = part_trainloader
         self.pre_lr = pre_lr
         self.pre_wd = pre_wd
 
@@ -47,25 +49,26 @@ class PreAccumulating(Pipeline):
 
         self.model.to(self.device)
 
+        valid_loss = 0
         for epoch in range(self.epochs):
             train_loss = 0
             self.model.train()
 
             # Preconditioning step
             for pre_epoch in range(self.pre_epochs):
-                for i, part_loader in enumerate(self.part_trainloaders):
+                for i in range(self.num_parts):
                     pre_train_loss = 0
-                    for data in part_loader:
-                        x = data.x.to(self.device)
-                        y = data.y.to(self.device)
+                    for data in self.part_trainloader:
+                        x = getattr(data, f"x_{i}").to(self.device)
+                        edge_index = getattr(data, f"edge_index_{i}").to(self.device)
+                        batch = getattr(data, f"x_{i}_batch").to(self.device)
 
-                        edge_index = data.edge_index.to(self.device)
-                        batch = data.batch.to(self.device)
+                        y = data.y.to(self.device)
 
                         out = self.model(x, edge_index, batch)
                         loss = self.model.loss(out, y)
 
-                        loss = loss / len(part_loader)
+                        loss = loss / len(self.part_trainloader)
                         pre_train_loss += loss.detach().item()
                         loss.backward()
 
@@ -143,10 +146,10 @@ class PreAccumulating(Pipeline):
                 step=epoch,
             )
 
-        accuracy = 0  # self.test()
+        accuracy = self.test()
         if not self.quiet:
             print(f"{self.name} Accuracy: {accuracy}")
 
         mlflow.log_metric("test/accuracy", accuracy)
 
-        return accuracy
+        return valid_loss

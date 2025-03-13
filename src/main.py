@@ -9,9 +9,8 @@ import mlflow
 import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
-from torch_geometric.data import ClusterLoader, Data
 from torch_geometric.datasets import GNNBenchmarkDataset
-from torch_geometric.loader import ClusterData, DataLoader
+from torch_geometric.loader import DataLoader
 
 from models import GCN, SimpleGCN
 from pipelines.accumulating import Accumulating
@@ -127,70 +126,28 @@ def main():
 
     torch.backends.cudnn.benchmark = False
 
-    trainset, validset, testset = load_data(args.dataset, position_transform, args.u)
+    trainset, validset, testset = load_data(
+        args.dataset, position_transform, reload=args.u
+    )
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
     testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
-    part_trainloaders = None
+    part_trainloader = None
     if args.partitions > 1:
-        testset = GNNBenchmarkDataset(
+        partset = GNNBenchmarkDataset(
             root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
             name=args.dataset,
             split="train",
             pre_transform=lambda data: partition_transform(data, args.partitions),
-            # force_reload=reload,
+            # force_reload=True,  # args.u,
         )
-
-        # cluster_data = ClusterData(
-        #     trainset._data,
-        #     num_parts=args.partitions,
-        #     save_dir=str(DATASET_DIR / args.dataset),
-        #     filename="train.pt",
-        # )
-
-        # loader = ClusterLoader(cluster_data, batch_size=1, shuffle=True)
-        # print(len(loader))
-        # it = iter(loader)
-        # print(next(it))
-        # print(next(it))
-        # return
-
-        # part_trainloaders = [
-        #     DataLoader(
-        #         [
-        #             Data(
-        #                 x=cluster_data[i].x,
-        #                 y=cluster_data[i].y,
-        #                 # HACK: all edge indexes are left in the first partition
-        #                 edge_index=cluster_data[0].edge_index,
-        #             ),
-        #         ],
-        #         batch_size=args.batch,
-        #         shuffle=True,
-        #     )
-        #     for i in range(len(cluster_data))
-        # ]
-        # return
-
-        # part_trainloaders = [
-        #     DataLoader(
-        #         dataset=DatasetPart(
-        #             Data(
-        #                 x=cluster_data[i].x,
-        #                 y=cluster_data[i].y,
-        #                 # HACK: all edge indexes are left in the first partition
-        #                 edge_index=cluster_data[0].edge_index,
-        #             ),
-        #             root=str(
-        #                 DATASET_DIR / f"{args.dataset}p{args.partitions}_split{i}"
-        #             ),
-        #         ),
-        #         batch_size=args.batch,
-        #         shuffle=True,
-        #     )
-        #     for i in range(len(cluster_data))
-        # ]
+        part_trainloader = DataLoader(
+            partset,
+            batch_size=args.batch,
+            shuffle=True,
+            follow_batch=[f"x_{i}" for i in range(args.partitions)],
+        )
 
     model = MODELS[args.model](
         in_dim=trainset.num_features,
@@ -199,20 +156,45 @@ def main():
         n_classes=trainset.num_classes,
     )
 
-    name = f"{type(model).__name__}_p{args.partitions}_seed{args.seed}_lr{args.lr}_prec_lr{args.pre_lr}"
+    name = f"{type(model).__name__}_p{args.partitions}_seed{args.seed}"
 
     params = {
         "epochs": args.epochs,
+        "pre_epochs": 1,
         "lr": args.lr,
         "pre_lr": args.pre_lr,
         "wd": args.weight_decay,
         "pre_wd": 0,
-        "pre_epochs": 1,
     }
 
-    # search_space = {
-    #         "lr"
-    #         }
+    search_space = {
+        "epochs": hp.uniformint("epochs", 100, 200),
+        "pre_epochs": hp.uniformint("pre_epochs", 10, 200),
+        "lr": hp.loguniform("lr", np.log(1e-5), np.log(1e-1)),
+        "pre_lr": hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
+        "wd": hp.loguniform("wd", np.log(1e-5), np.log(1e-1)),
+        "pre_wd": hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-1)),
+    }
+
+    def objective(params):
+        l_name = name + f"_lr{params['lr']}_prec_lr{params['pre_lr']}"
+        print(l_name)
+        with mlflow.start_run(run_name=l_name, nested=True):
+            loss = PIPELINES[args.pipeline](
+                name=l_name,
+                model=model,
+                trainloader=trainloader,
+                validloader=validloader,
+                testloader=testloader,
+                device=device,
+                quiet=args.q,
+                part_trainloader=part_trainloader,
+                num_parts=args.partitions,
+                **params,
+            ).run()
+
+            mlflow.pytorch.log_model(model, l_name)
+        return {"loss": loss, "status": STATUS_OK}
 
     mlflow.set_experiment("graph-partitioning")
     with mlflow.start_run(run_name=name):
@@ -226,19 +208,14 @@ def main():
                 **params,
             }
         )
-        PIPELINES[args.pipeline](
-            name=name,
-            model=model,
-            trainloader=trainloader,
-            validloader=validloader,
-            testloader=testloader,
-            device=device,
-            quiet=args.q,
-            part_trainloaders=part_trainloaders,
-            **params,
-        ).run()
-
-        # mlflow.pytorch.log_model(model, name)
+        trials = Trials()
+        fmin(
+            fn=objective,
+            space=search_space,
+            algo=tpe.suggest,
+            max_evals=20,
+            trials=trials,
+        )
 
 
 if __name__ == "__main__":
