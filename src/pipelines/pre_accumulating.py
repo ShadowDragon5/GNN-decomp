@@ -40,12 +40,12 @@ class PreAccumulating(Pipeline):
             patience=5,
         )
 
-        # pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #     pre_optimizer,
-        #     mode="min",
-        #     factor=0.5,
-        #     patience=5,
-        # )
+        pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            pre_optimizer,
+            mode="min",
+            factor=0.5,
+            patience=5,
+        )
 
         self.model.to(self.device)
 
@@ -132,7 +132,7 @@ class PreAccumulating(Pipeline):
             valid_loss /= len(self.validloader)
 
             scheduler.step(valid_loss)
-            # pre_scheduler.step(valid_loss)  # NOTE: maybe check with pre_train loss?
+            pre_scheduler.step(valid_loss)  # NOTE: maybe check with pre_train loss?
 
             if not self.quiet:
                 print(f"{self.name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")

@@ -66,16 +66,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("-seed", type=int, default=42)
 
     parser.add_argument("-batch", type=int, default=128)
-    parser.add_argument("-epochs", type=int, default=100)
+    parser.add_argument("-epochs", type=int)
 
-    parser.add_argument("-lr", type=float, default=0.001, help="learning rate")
+    parser.add_argument("-lr", type=float, help="learning rate")
     parser.add_argument(
         "-pre_lr",
         type=float,
-        default=0.0001,
         help="preconditioner learning rate (only for 'pre-' pipelines)",
     )
-    parser.add_argument("-weight_decay", type=float, default=5e-4)
+    parser.add_argument("-weight_decay", type=float)
 
     return parser.parse_args()
 
@@ -136,7 +135,8 @@ def main():
     testloader = DataLoader(testset, batch_size=args.batch, shuffle=False)
 
     part_trainloader = None
-    if args.partitions > 1:
+    has_pre = args.partitions > 1
+    if has_pre:
         partset = GNNBenchmarkDataset(
             root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
             name=args.dataset,
@@ -160,27 +160,41 @@ def main():
 
     name = f"{type(model).__name__}_p{args.partitions}_seed{args.seed}"
 
-    params = {
-        "epochs": args.epochs,
-        "pre_epochs": 1,
-        "lr": args.lr,
-        "pre_lr": args.pre_lr,
-        "wd": args.weight_decay,
-        "pre_wd": 0,
-    }
+    # params = {
+    #     "epochs": args.epochs,
+    #     "pre_epochs": 1,
+    #     "lr": args.lr,
+    #     "pre_lr": args.pre_lr,
+    #     "wd": args.weight_decay,
+    #     "pre_wd": 0,
+    # }
 
     search_space = {
-        "epochs": hp.uniformint("epochs", 100, 200),
-        "pre_epochs": hp.uniformint("pre_epochs", 1, 100),
-        "lr": hp.loguniform("lr", np.log(1e-5), np.log(1e-1)),
-        "pre_lr": hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
-        "wd": hp.loguniform("wd", np.log(1e-5), np.log(1e-1)),
-        "pre_wd": hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-1)),
+        "epochs": args.epochs if args.epochs else hp.uniformint("epochs", 50, 200),
+        "lr": args.lr if args.lr else hp.loguniform("lr", np.log(1e-5), np.log(1e-2)),
+        "wd": args.weight_decay
+        if args.weight_decay
+        else hp.loguniform("wd", np.log(1e-5), np.log(1e-1)),
+        **(
+            {
+                "pre_epochs": hp.uniformint("pre_epochs", 1, 100),
+                "pre_lr": args.pre_lr
+                if args.pre_lr
+                else hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
+                "pre_wd": hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-2)),
+            }
+            if has_pre
+            else {}
+        ),
     }
 
     def objective(params):
-        l_name = name + f"_lr{params['lr']}_prec_lr{params['pre_lr']}"
-        print(l_name)
+        l_name = (
+            name
+            + f"_lr{params['lr']}"
+            + (f"_pre_lr{params['pre_lr']}_sch" if has_pre else "")
+        )
+        print(params)
         with mlflow.start_run(run_name=l_name, nested=True):
             mlflow.log_params(params)
             loss = PIPELINES[args.pipeline](
@@ -208,7 +222,6 @@ def main():
                 "model": args.model,
                 "dataset": args.dataset,
                 "batch": args.batch,
-                **params,
             }
         )
         trials = Trials()
@@ -216,7 +229,7 @@ def main():
             fn=objective,
             space=search_space,
             algo=tpe.suggest,
-            max_evals=20,
+            max_evals=5,
             trials=trials,
         )
 
