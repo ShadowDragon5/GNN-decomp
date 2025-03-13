@@ -17,6 +17,7 @@ from pipelines.accumulating import Accumulating
 from pipelines.batched import Batched
 from pipelines.common import Pipeline
 from pipelines.pre_accumulating import PreAccumulating
+from pipelines.pre_batched import PreBatched
 from utils import partition_transform, position_transform
 
 DATASET_DIR = Path("./datasets")
@@ -30,6 +31,7 @@ PIPELINES: dict[str, Type[Pipeline]] = {
     "batched": Batched,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
     "pre-accumulating": PreAccumulating,
+    "pre-batched": PreBatched,
 }
 
 DATASETS = [
@@ -169,7 +171,7 @@ def main():
 
     search_space = {
         "epochs": hp.uniformint("epochs", 100, 200),
-        "pre_epochs": hp.uniformint("pre_epochs", 10, 200),
+        "pre_epochs": hp.uniformint("pre_epochs", 1, 100),
         "lr": hp.loguniform("lr", np.log(1e-5), np.log(1e-1)),
         "pre_lr": hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
         "wd": hp.loguniform("wd", np.log(1e-5), np.log(1e-1)),
