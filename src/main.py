@@ -35,7 +35,7 @@ PIPELINES: dict[str, Type[Pipeline]] = {
 }
 
 DATASETS = [
-    # "PATTERN",
+    "PATTERN",
     # "CLUSTER",
     "MNIST",
     "CIFAR10",
@@ -59,22 +59,34 @@ def parse_arguments() -> argparse.Namespace:
         default=1,
         help="use partitioned version of datasets and pipelines",
     )
+    parser.add_argument("-name", type=str)
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
     parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
-
     parser.add_argument("-batch", type=int, default=128)
-    parser.add_argument("-epochs", type=int)
 
+    parser.add_argument("-epochs", type=int)
     parser.add_argument("-lr", type=float, help="learning rate")
+    parser.add_argument("-wd", type=float, help="weight decay")
+
+    parser.add_argument("-pre_epochs", type=int)
     parser.add_argument(
         "-pre_lr",
         type=float,
         help="preconditioner learning rate (only for 'pre-' pipelines)",
     )
-    parser.add_argument("-weight_decay", type=float)
+    parser.add_argument(
+        "-pre_wd",
+        type=float,
+        help="preconditioner weight decay (only for 'pre-' pipelines)",
+    )
+    parser.add_argument(
+        "-ASM",
+        action="store_true",
+        help="use Additive Schwarz Method preconditioner",
+    )
 
     return parser.parse_args()
 
@@ -142,7 +154,7 @@ def main():
             name=args.dataset,
             split="train",
             pre_transform=lambda data: partition_transform(data, args.partitions),
-            # force_reload=True,  # args.u,
+            force_reload=args.u,
         )
         part_trainloader = DataLoader(
             partset,
@@ -151,54 +163,55 @@ def main():
             follow_batch=[f"x_{i}" for i in range(args.partitions)],
         )
 
-    model = MODELS[args.model](
-        in_dim=trainset.num_features,
-        hidden_dim=146,
-        out_dim=146,
-        n_classes=trainset.num_classes,
-    )
-
-    name = f"{type(model).__name__}_p{args.partitions}_seed{args.seed}"
-
-    # params = {
-    #     "epochs": args.epochs,
-    #     "pre_epochs": 1,
-    #     "lr": args.lr,
-    #     "pre_lr": args.pre_lr,
-    #     "wd": args.weight_decay,
-    #     "pre_wd": 0,
-    # }
-
     search_space = {
-        "epochs": args.epochs if args.epochs else hp.uniformint("epochs", 50, 200),
-        "lr": args.lr if args.lr else hp.loguniform("lr", np.log(1e-5), np.log(1e-2)),
-        "wd": args.weight_decay
-        if args.weight_decay
-        else hp.loguniform("wd", np.log(1e-5), np.log(1e-1)),
+        "epochs": args.epochs
+        if args.epochs is not None
+        else hp.uniformint("epochs", 10, 100),
+        "lr": args.lr
+        if args.lr is not None
+        else hp.loguniform("lr", np.log(1e-5), np.log(1e-2)),
+        "wd": args.wd
+        if args.wd is not None
+        else hp.loguniform("wd", np.log(1e-5), np.log(1e-2)),
         **(
             {
-                "pre_epochs": hp.uniformint("pre_epochs", 1, 100),
+                "pre_epochs": args.pre_epochs
+                if args.pre_epochs is not None
+                else hp.uniformint("pre_epochs", 1, 100),
                 "pre_lr": args.pre_lr
-                if args.pre_lr
+                if args.pre_lr is not None
                 else hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
-                "pre_wd": hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-2)),
+                "pre_wd": args.pre_wd
+                if args.pre_wd is not None
+                else hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-3)),
             }
             if has_pre
             else {}
         ),
     }
 
+    name = ""
+    if args.name:
+        name += f"{args.name}_"
+    if has_pre:
+        if args.ASM:
+            name += "AS_"
+        else:
+            name += "MS_"
+    name += f"{args.model}_p{args.partitions}_s{args.seed}"
+
     def objective(params):
-        l_name = (
-            name
-            + f"_lr{params['lr']}"
-            + (f"_pre_lr{params['pre_lr']}_sch" if has_pre else "")
+        model = MODELS[args.model](
+            in_dim=trainset.num_features,
+            hidden_dim=146,
+            out_dim=146,
+            n_classes=trainset.num_classes,
         )
-        print(params)
-        with mlflow.start_run(run_name=l_name, nested=True):
+
+        with mlflow.start_run(nested=True):
             mlflow.log_params(params)
-            loss = PIPELINES[args.pipeline](
-                name=l_name,
+            pipeline = PIPELINES[args.pipeline](
+                name=name,
                 model=model,
                 trainloader=trainloader,
                 validloader=validloader,
@@ -207,10 +220,12 @@ def main():
                 quiet=args.q,
                 part_trainloader=part_trainloader,
                 num_parts=args.partitions,
+                ASM=args.ASM,
                 **params,
-            ).run()
+            )
+            loss = pipeline.run()
 
-            mlflow.pytorch.log_model(model, l_name)
+            mlflow.pytorch.log_model(pipeline.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
     mlflow.set_experiment("graph-partitioning")
@@ -225,13 +240,16 @@ def main():
             }
         )
         trials = Trials()
-        fmin(
+        best = fmin(
             fn=objective,
             space=search_space,
             algo=tpe.suggest,
             max_evals=5,
             trials=trials,
         )
+
+        if best is not None:
+            mlflow.log_params(best)
 
 
 if __name__ == "__main__":

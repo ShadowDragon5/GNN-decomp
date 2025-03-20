@@ -1,5 +1,8 @@
+from copy import deepcopy
+
 import mlflow
 import torch
+from torch.nn import Module
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -16,6 +19,7 @@ class PreAccumulating(Pipeline):
         num_parts: int,
         pre_lr: float,
         pre_wd: float,
+        ASM: bool,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -24,24 +28,64 @@ class PreAccumulating(Pipeline):
         self.part_trainloader = part_trainloader
         self.pre_lr = pre_lr
         self.pre_wd = pre_wd
+        self.ASM = ASM
 
-    def run(self) -> float:
-        optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, weight_decay=self.wd
-        )
+    def precondition(self, model: Module, i: int, epoch: int) -> Module:
         pre_optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.pre_lr, weight_decay=self.pre_wd
+            model.parameters(), lr=self.pre_lr, weight_decay=self.pre_wd
         )
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
+        pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            pre_optimizer,
             mode="min",
             factor=0.5,
             patience=5,
         )
 
-        pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            pre_optimizer,
+        for pre_epoch in range(self.pre_epochs):
+            pre_train_loss = 0
+
+            for data in tqdm(
+                self.part_trainloader,
+                desc=f"P{i} Epoch: {pre_epoch:03}",
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+            ):
+                x = getattr(data, f"x_{i}").to(self.device)
+                edge_index = getattr(data, f"edge_index_{i}").to(self.device)
+                batch = getattr(data, f"x_{i}_batch").to(self.device)
+
+                y = data.y.to(self.device)
+
+                out = model(x, edge_index, batch)
+                loss = model.loss(out, y)
+
+                loss = loss / len(self.part_trainloader)
+                pre_train_loss += loss.detach().item()
+                loss.backward()
+
+            pre_optimizer.step()
+            pre_optimizer.zero_grad()
+            pre_scheduler.step(pre_train_loss)
+
+            mlflow.log_metrics(
+                {
+                    f"pre_train/loss_p{i}": pre_train_loss,
+                    f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
+                },
+                step=epoch * self.pre_epochs + pre_epoch,
+            )
+        return model
+
+    def run(self) -> float:
+        """Main training loop"""
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.lr, weight_decay=self.wd
+        )
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
             mode="min",
             factor=0.5,
             patience=5,
@@ -55,38 +99,35 @@ class PreAccumulating(Pipeline):
             self.model.train()
 
             # Preconditioning step
-            for pre_epoch in range(self.pre_epochs):
+            if self.ASM:  # Additive Schwarz
+                models = []
                 for i in range(self.num_parts):
-                    pre_train_loss = 0
-                    for data in self.part_trainloader:
-                        x = getattr(data, f"x_{i}").to(self.device)
-                        edge_index = getattr(data, f"edge_index_{i}").to(self.device)
-                        batch = getattr(data, f"x_{i}_batch").to(self.device)
-
-                        y = data.y.to(self.device)
-
-                        out = self.model(x, edge_index, batch)
-                        loss = self.model.loss(out, y)
-
-                        loss = loss / len(self.part_trainloader)
-                        pre_train_loss += loss.detach().item()
-                        loss.backward()
-
-                    pre_optimizer.step()
-                    pre_optimizer.zero_grad()
-
-                    mlflow.log_metrics(
-                        {
-                            f"pre_train/loss_p{i}": pre_train_loss,
-                        },
-                        step=epoch * self.pre_epochs + pre_epoch,
+                    models.append(
+                        self.precondition(
+                            deepcopy(self.model).to(self.device), i, epoch
+                        ).state_dict()
                     )
+
+                # TODO: try other strategies
+                # average model weights
+                w_avg = models[0]
+                for key in w_avg:
+                    if w_avg[key].data.dtype == torch.float:
+                        for m in models[1:]:
+                            w_avg[key].data += m[key].data.clone()
+                        w_avg[key] /= len(models)
+                self.model.load_state_dict(w_avg)
+
+            else:  # Multiplicative Schwarz
+                for i in range(self.num_parts):
+                    self.precondition(self.model, i, epoch)
 
             # Full pass
             for data in tqdm(
                 self.trainloader,
                 desc=f"Epoch: {epoch:03}",
                 dynamic_ncols=True,
+                leave=False,
                 disable=self.quiet,
             ):
                 x = data.x.to(self.device)
@@ -112,7 +153,10 @@ class PreAccumulating(Pipeline):
             self.model.eval()
             with torch.no_grad():
                 for data in tqdm(
-                    self.validloader, dynamic_ncols=True, disable=self.quiet
+                    self.validloader,
+                    dynamic_ncols=True,
+                    leave=False,
+                    disable=self.quiet,
                 ):
                     x = data.x.to(self.device)
                     y = data.y.to(self.device)
@@ -132,14 +176,14 @@ class PreAccumulating(Pipeline):
             valid_loss /= len(self.validloader)
 
             scheduler.step(valid_loss)
-            pre_scheduler.step(valid_loss)  # NOTE: maybe check with pre_train loss?
 
             if not self.quiet:
-                print(f"{self.name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+                print(f"Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
 
             mlflow.log_metrics(
                 {
                     "train/loss": train_loss,
+                    "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
                     "validate/accuracy": correct / total,
                 },
@@ -148,7 +192,7 @@ class PreAccumulating(Pipeline):
 
         accuracy = self.test()
         if not self.quiet:
-            print(f"{self.name} Accuracy: {accuracy}")
+            print(f"Accuracy: {accuracy}")
 
         mlflow.log_metric("test/accuracy", accuracy)
 
