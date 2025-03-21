@@ -59,6 +59,12 @@ def parse_arguments() -> argparse.Namespace:
         default=1,
         help="use partitioned version of datasets and pipelines",
     )
+    parser.add_argument(
+        "-max_evals",
+        type=int,
+        default=5,
+        help="max evaluations for hyperopt search",
+    )
     parser.add_argument("-name", type=str)
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
@@ -244,7 +250,7 @@ def main():
             fn=objective,
             space=search_space,
             algo=tpe.suggest,
-            max_evals=5,
+            max_evals=args.max_evals,
             trials=trials,
         )
 
