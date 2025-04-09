@@ -1,14 +1,28 @@
 import re
 
-import matplotlib.pyplot as plt
-import networkx as nx
-import numpy as np
+# import matplotlib.pyplot as plt
+# import networkx as nx
+# import numpy as np
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
 
 
 class PartitionedData(Data):
+    def get_x(self, i, device):
+        return getattr(self, f"x_{i}").to(device)
+
+    def get_y(self, i, device):
+        return getattr(self, f"y_{i}").to(device)
+
+    def get_edge_index(self, i, device):
+        return getattr(self, f"edge_index_{i}").to(device)
+
+    def get_batch(self, i, device):
+        if (batch := getattr(self, f"batch_{i}", None)) is not None:
+            return batch.to(device)
+        return None
+
     def __inc__(self, key, value, *args, **kwargs):
         if m := re.match(r"edge_index_(\d+)", key):
             x = getattr(self, f"x_{m.group(1)}")
@@ -35,8 +49,6 @@ def part_to_data(x, y, A) -> Data:
 
 def partition_transform_global(data: Data, num_parts: int = 2):
     """Spectral graph decomposition"""
-    data = position_transform(data)
-
     assert data.x is not None
     assert data.y is not None
     assert data.edge_index is not None
@@ -53,9 +65,10 @@ def partition_transform_global(data: Data, num_parts: int = 2):
     for i in range(num_parts):
         G = data.subgraph(torch.tensor(labels == i))
         subgraphs[f"x_{i}"] = G.x
+        subgraphs[f"y_{i}"] = G.y
         subgraphs[f"edge_index_{i}"] = G.edge_index
 
-    return PartitionedData(y=data.y, batch=data.batch, **subgraphs)
+    return PartitionedData(batch=data.batch, **subgraphs)
 
 
 # def partition_transform(data: Data, num_parts: int = 2):

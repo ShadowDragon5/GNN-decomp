@@ -159,13 +159,13 @@ def main():
     part_trainloader = None
     has_pre = args.partitions > 1
     if has_pre:
-        # TODO: add local partitioning
         partset = GNNBenchmarkDataset(
             root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
             name=args.dataset,
             split="train",
             pre_transform=lambda data: partition_transform_global(
-                data, args.partitions
+                data if args.dataset == "PATTERN" else position_transform(data),
+                args.partitions,
             ),
             force_reload=args.u,
         )

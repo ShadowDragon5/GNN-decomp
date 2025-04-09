@@ -7,6 +7,7 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from pipelines.common import Pipeline
+from utils import PartitionedData
 
 
 class PreAccumulating(Pipeline):
@@ -52,11 +53,11 @@ class PreAccumulating(Pipeline):
                 leave=False,
                 disable=self.quiet,
             ):
-                x = getattr(data, f"x_{i}").to(self.device)
-                edge_index = getattr(data, f"edge_index_{i}").to(self.device)
-                batch = getattr(data, f"x_{i}_batch").to(self.device)
-
-                y = data.y.to(self.device)
+                data: PartitionedData = data
+                x = data.get_x(i, self.device).to(self.device)
+                edge_index = data.get_edge_index(i, self.device)
+                batch = data.get_batch(i, self.device)
+                y = data.get_y(i, self.device)
 
                 out = model(x, edge_index, batch)
                 loss = model.loss(out, y)
