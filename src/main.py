@@ -12,19 +12,20 @@ from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
-from models import GCN, SimpleGCN
+from models import GCN, GCN_NODE
 from pipelines.accumulating import Accumulating
 from pipelines.batched import Batched
 from pipelines.common import Pipeline
 from pipelines.pre_accumulating import PreAccumulating
 from pipelines.pre_batched import PreBatched
-from utils import partition_transform, position_transform
+from utils import partition_transform_global, position_transform
 
 DATASET_DIR = Path("./datasets")
 
 MODELS = {
-    "GCN": GCN,
-    "Simple": SimpleGCN,
+    "GCN_SuperPix": lambda **kwargs: GCN(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_Pattern": lambda **kwargs: GCN_NODE(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_WikiCS": lambda **kwargs: GCN(hidden_dim=120, out_dim=120, **kwargs),
 }
 
 PIPELINES: dict[str, Type[Pipeline]] = {
@@ -66,12 +67,13 @@ def parse_arguments() -> argparse.Namespace:
         help="max evaluations for hyperopt search",
     )
     parser.add_argument("-name", type=str)
-    parser.add_argument("-model", choices=MODELS.keys(), default="GCN")
+    parser.add_argument("-model", choices=MODELS.keys(), default="GCN_SuperPix")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
     parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
     parser.add_argument("-batch", type=int, default=128)
+    parser.add_argument("-dropout", type=float, default=0.0)
 
     parser.add_argument("-epochs", type=int)
     parser.add_argument("-lr", type=float, help="learning rate")
@@ -146,7 +148,9 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     trainset, validset, testset = load_data(
-        args.dataset, position_transform, reload=args.u
+        args.dataset,
+        None if args.dataset == "PATTERN" else position_transform,
+        reload=args.u,
     )
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
@@ -155,11 +159,14 @@ def main():
     part_trainloader = None
     has_pre = args.partitions > 1
     if has_pre:
+        # TODO: add local partitioning
         partset = GNNBenchmarkDataset(
             root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
             name=args.dataset,
             split="train",
-            pre_transform=lambda data: partition_transform(data, args.partitions),
+            pre_transform=lambda data: partition_transform_global(
+                data, args.partitions
+            ),
             force_reload=args.u,
         )
         part_trainloader = DataLoader(
@@ -201,20 +208,19 @@ def main():
         name += f"{args.name}_"
     if has_pre:
         if args.ASM:
-            name += "AS_"
+            name += "AS_"  # Additive
         else:
-            name += "MS_"
+            name += "MS_"  # Multiplicative
     name += f"{args.model}_p{args.partitions}_s{args.seed}"
 
     def objective(params):
         model = MODELS[args.model](
             in_dim=trainset.num_features,
-            hidden_dim=146,
-            out_dim=146,
             n_classes=trainset.num_classes,
+            dropout=args.dropout,
         )
 
-        with mlflow.start_run(nested=True):
+        with mlflow.start_run(run_name=name, nested=True):
             mlflow.log_params(params)
             pipeline = PIPELINES[args.pipeline](
                 name=name,
@@ -235,7 +241,7 @@ def main():
         return {"loss": loss, "status": STATUS_OK}
 
     mlflow.set_experiment("graph-partitioning")
-    with mlflow.start_run(run_name=name):
+    with mlflow.start_run(run_name=f"{args.dataset}_{name}"):
         mlflow.log_params(
             {
                 "seed": args.seed,
