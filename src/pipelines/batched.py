@@ -1,8 +1,8 @@
+import mlflow
 import torch
 from tqdm import tqdm
 
 from pipelines.common import Pipeline
-from utils import write_results
 
 
 class Batched(Pipeline):
@@ -14,9 +14,9 @@ class Batched(Pipeline):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def run(self) -> None:
+    def run(self) -> float:
         optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -55,11 +55,6 @@ class Batched(Pipeline):
 
             train_loss /= len(self.trainloader)
 
-            if epoch == self.epochs - 1:
-                torch.save(
-                    self.model.state_dict(), f"saves/training_{self.name}_{epoch:03}.pt"
-                )
-
             # Validation
             valid_loss = 0
             correct = 0
@@ -89,17 +84,17 @@ class Batched(Pipeline):
             if not self.quiet:
                 print(f"{self.name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
 
-            write_results(
-                f"{self.name}.csv",
-                epoch=epoch,
-                train_loss=train_loss,
-                valid_loss=valid_loss,
-                valid_acc=correct / total,
+            mlflow.log_metrics(
+                {
+                    "train/loss": train_loss,
+                    "validate/loss": valid_loss,
+                    "validate/accuracy": correct / total,
+                },
+                step=epoch,
             )
 
         accuracy = self.test()
         print(f"{self.name} Accuracy: {accuracy}")
-        write_results(
-            f"{self.name}.csv",
-            test_acc=accuracy,
-        )
+        mlflow.log_metric("test/accuracy", accuracy)
+
+        return accuracy

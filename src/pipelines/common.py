@@ -17,7 +17,7 @@ class Pipeline(ABC):
         device: torch.device,
         epochs: int,
         lr: float,
-        weight_decay: float,
+        wd: float,
         quiet: bool = False,
         **_,
     ) -> None:
@@ -29,11 +29,11 @@ class Pipeline(ABC):
         self.device = device
         self.epochs = epochs
         self.lr = lr
-        self.weight_decay = weight_decay
+        self.wd = wd
         self.quiet = quiet
 
     @abstractmethod
-    def run(self) -> None:
+    def run(self) -> float:
         pass
 
     def test(self) -> float:
