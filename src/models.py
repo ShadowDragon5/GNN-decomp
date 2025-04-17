@@ -126,3 +126,18 @@ class GCN_NODE(nn.Module):
 
         criterion = nn.CrossEntropyLoss()
         return criterion(pred, label)
+
+
+if __name__ == "__main__":
+    model = GCN(
+        hidden_dim=146,
+        out_dim=146,
+        in_dim=5,
+        n_classes=2,
+    )
+
+    d = model.state_dict()
+    for k, v in d.items():
+        print(v.data.dtype)
+        if v.data.dtype != torch.float:
+            print(k, v)

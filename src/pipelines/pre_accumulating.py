@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Callable
 
 import mlflow
 import torch
@@ -8,6 +9,13 @@ from tqdm import tqdm
 
 from pipelines.common import Pipeline
 from utils import PartitionedData
+
+
+def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
+    """Apply `fun` to `a` model state dictionary"""
+    for key in a:
+        if a[key].data.dtype == torch.float:
+            a[key] = fun(a[key]) if b is None else fun(a[key], b[key])
 
 
 class PreAccumulating(Pipeline):
@@ -21,6 +29,7 @@ class PreAccumulating(Pipeline):
         pre_lr: float,
         pre_wd: float,
         ASM: bool,
+        batched: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -30,6 +39,7 @@ class PreAccumulating(Pipeline):
         self.pre_lr = pre_lr
         self.pre_wd = pre_wd
         self.ASM = ASM
+        self.batched = batched
 
     def precondition(self, model: Module, i: int, epoch: int) -> Module:
         pre_optimizer = torch.optim.Adam(
@@ -65,9 +75,13 @@ class PreAccumulating(Pipeline):
                 loss = loss / len(self.part_trainloader)
                 pre_train_loss += loss.detach().item()
                 loss.backward()
+                if self.batched:
+                    pre_optimizer.step()
+                    pre_optimizer.zero_grad()
 
-            pre_optimizer.step()
-            pre_optimizer.zero_grad()
+            if not self.batched:
+                pre_optimizer.step()
+                pre_optimizer.zero_grad()
             pre_scheduler.step(pre_train_loss)
 
             mlflow.log_metrics(
@@ -102,21 +116,37 @@ class PreAccumulating(Pipeline):
             # Preconditioning step
             if self.ASM:  # Additive Schwarz
                 models = []
+                w_0 = self.model.state_dict()
+
                 for i in range(self.num_parts):
-                    models.append(
-                        self.precondition(
-                            deepcopy(self.model).to(self.device), i, epoch
-                        ).state_dict()
+                    w_k = self.precondition(
+                        deepcopy(self.model).to(self.device), i, epoch
+                    ).state_dict()
+
+                    apply_to_models(
+                        w_k,
+                        lambda a, b: a - b,
+                        w_0,
+                    )
+                    models.append(w_k)
+
+                # # average model weights
+                # w_avg = models[0]
+                # for key in w_avg:
+                #     if w_avg[key].data.dtype == torch.float:
+                #         for m in models[1:]:
+                #             w_avg[key].data += m[key].data.clone()
+                #         w_avg[key] /= len(models)
+
+                w_avg = w_0
+                for m in models:
+                    gamma = 1 / len(models)  # TODO different combination tactics
+                    apply_to_models(
+                        w_avg,
+                        lambda a, b: a + gamma * b,
+                        m,
                     )
 
-                # TODO: try other strategies
-                # average model weights
-                w_avg = models[0]
-                for key in w_avg:
-                    if w_avg[key].data.dtype == torch.float:
-                        for m in models[1:]:
-                            w_avg[key].data += m[key].data.clone()
-                        w_avg[key] /= len(models)
                 self.model.load_state_dict(w_avg)
 
             else:  # Multiplicative Schwarz
@@ -143,9 +173,13 @@ class PreAccumulating(Pipeline):
                 loss = loss / len(self.trainloader)
                 train_loss += loss.detach().item()
                 loss.backward()
+                if self.batched:
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-            optimizer.step()
-            optimizer.zero_grad()
+            if not self.batched:
+                optimizer.step()
+                optimizer.zero_grad()
 
             # Validation
             valid_loss = 0

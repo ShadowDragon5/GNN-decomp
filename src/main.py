@@ -3,7 +3,7 @@ import random
 from logging import warning
 from os import makedirs
 from pathlib import Path
-from typing import Type
+from typing import Callable, Type
 
 import mlflow
 import numpy as np
@@ -17,7 +17,6 @@ from pipelines.accumulating import Accumulating
 from pipelines.batched import Batched
 from pipelines.common import Pipeline
 from pipelines.pre_accumulating import PreAccumulating
-from pipelines.pre_batched import PreBatched
 from utils import partition_transform_global, position_transform
 
 DATASET_DIR = Path("./datasets")
@@ -28,11 +27,12 @@ MODELS = {
     "GCN_WikiCS": lambda **kwargs: GCN(hidden_dim=120, out_dim=120, **kwargs),
 }
 
-PIPELINES: dict[str, Type[Pipeline]] = {
+PIPELINES: dict[str, Type[Pipeline] | Callable[..., Pipeline]] = {
     "batched": Batched,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
     "pre-accumulating": PreAccumulating,
-    "pre-batched": PreBatched,
+    # "pre-batched": PreBatched,
+    "pre-batched": lambda **kwargs: PreAccumulating(batched=True, **kwargs),
 }
 
 DATASETS = [

@@ -21,6 +21,7 @@ class PartitionedData(Data):
     def get_batch(self, i, device):
         if (batch := getattr(self, f"batch_{i}", None)) is not None:
             return batch.to(device)
+        # datasets like PATTERN don't have batch masks
         return None
 
     def __inc__(self, key, value, *args, **kwargs):
