@@ -37,6 +37,8 @@ class Batched(Pipeline):
                 desc=f"Epoch: {epoch:02}",
                 dynamic_ncols=True,
                 disable=self.quiet,
+                leave=False,
+                position=2,
             ):
                 x = data.x.to(self.device)
                 y = data.y.to(self.device)
@@ -61,7 +63,12 @@ class Batched(Pipeline):
             total = 0
             self.model.eval()
             with torch.no_grad():
-                for data in tqdm(self.validloader, dynamic_ncols=True):
+                for data in tqdm(
+                    self.validloader,
+                    dynamic_ncols=True,
+                    leave=False,
+                    position=2,
+                ):
                     x = data.x.to(self.device)
                     y = data.y.to(self.device)
 

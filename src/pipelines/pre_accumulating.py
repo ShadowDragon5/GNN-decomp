@@ -58,10 +58,11 @@ class PreAccumulating(Pipeline):
 
             for data in tqdm(
                 self.part_trainloader,
-                desc=f"P{i} Epoch: {pre_epoch:03}",
+                desc=f"P{i} E{epoch:03}: {pre_epoch:02}",
                 dynamic_ncols=True,
                 leave=False,
                 disable=self.quiet,
+                position=2,
             ):
                 data: PartitionedData = data
                 x = data.get_x(i, self.device).to(self.device)
@@ -160,6 +161,7 @@ class PreAccumulating(Pipeline):
                 dynamic_ncols=True,
                 leave=False,
                 disable=self.quiet,
+                position=2,
             ):
                 x = data.x.to(self.device)
                 y = data.y.to(self.device)
@@ -192,6 +194,7 @@ class PreAccumulating(Pipeline):
                     dynamic_ncols=True,
                     leave=False,
                     disable=self.quiet,
+                    position=2,
                 ):
                     x = data.x.to(self.device)
                     y = data.y.to(self.device)
