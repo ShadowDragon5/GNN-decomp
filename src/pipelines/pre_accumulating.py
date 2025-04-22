@@ -41,9 +41,9 @@ class PreAccumulating(Pipeline):
         self.ASM = ASM
         self.batched = batched
 
-    def precondition(self, model: Module, i: int, epoch: int) -> Module:
+    def precondition(self, model: Module, lr: float, i: int, epoch: int) -> Module:
         pre_optimizer = torch.optim.Adam(
-            model.parameters(), lr=self.pre_lr, weight_decay=self.pre_wd
+            model.parameters(), lr=lr, weight_decay=self.pre_wd
         )
 
         pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -120,8 +120,14 @@ class PreAccumulating(Pipeline):
                 w_0 = self.model.state_dict()
 
                 for i in range(self.num_parts):
+                    # w_k = self.precondition(
+                    #     deepcopy(self.model).to(self.device), self.pre_lr, i, epoch
+                    # ).state_dict()
                     w_k = self.precondition(
-                        deepcopy(self.model).to(self.device), i, epoch
+                        deepcopy(self.model).to(self.device),
+                        scheduler.get_last_lr()[0],
+                        i,
+                        epoch,
                     ).state_dict()
 
                     apply_to_models(
@@ -152,7 +158,8 @@ class PreAccumulating(Pipeline):
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
-                    self.precondition(self.model, i, epoch)
+                    # self.precondition(self.model, self.pre_lr, i, epoch)
+                    self.precondition(self.model, scheduler.get_last_lr()[0], i, epoch)
 
             # Full pass
             for data in tqdm(
