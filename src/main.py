@@ -190,7 +190,7 @@ def main():
             {
                 "pre_epochs": args.pre_epochs
                 if args.pre_epochs is not None
-                else hp.uniformint("pre_epochs", 1, 100),
+                else hp.uniformint("pre_epochs", 1, 40),
                 "pre_lr": args.pre_lr
                 if args.pre_lr is not None
                 else hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
@@ -258,6 +258,7 @@ def main():
             algo=tpe.suggest,
             max_evals=args.max_evals,
             trials=trials,
+            show_progressbar=False,
         )
 
         if best is not None:

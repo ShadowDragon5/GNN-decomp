@@ -62,7 +62,6 @@ class PreAccumulating(Pipeline):
                 dynamic_ncols=True,
                 leave=False,
                 disable=self.quiet,
-                position=2,
             ):
                 data: PartitionedData = data
                 x = data.get_x(i, self.device).to(self.device)
@@ -166,9 +165,7 @@ class PreAccumulating(Pipeline):
                 self.trainloader,
                 desc=f"Epoch: {epoch:03}",
                 dynamic_ncols=True,
-                leave=False,
                 disable=self.quiet,
-                position=2,
             ):
                 x = data.x.to(self.device)
                 y = data.y.to(self.device)
