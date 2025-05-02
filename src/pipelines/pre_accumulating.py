@@ -26,9 +26,9 @@ class PreAccumulating(Pipeline):
         pre_epochs: int,
         part_trainloader: DataLoader,
         num_parts: int,
-        pre_lr: float,
         pre_wd: float,
         ASM: bool,
+        pre_lr: float = 0,
         batched: bool = False,
         **kwargs,
     ) -> None:
@@ -83,6 +83,14 @@ class PreAccumulating(Pipeline):
                 pre_optimizer.step()
                 pre_optimizer.zero_grad()
             pre_scheduler.step(pre_train_loss)
+
+            if pre_epoch % 20 == 0:
+                _, vloss = self.validate(self.model)
+                mlflow.log_metric(
+                    "pre/loss",
+                    vloss,
+                    step=(i + epoch * self.num_parts) * self.pre_epochs + pre_epoch,
+                )
 
             mlflow.log_metrics(
                 {
@@ -146,7 +154,7 @@ class PreAccumulating(Pipeline):
 
                 w_avg = w_0
                 for m in models:
-                    gamma = 1 / len(models)  # TODO different combination tactics
+                    gamma = 1 / len(models)
                     apply_to_models(
                         w_avg,
                         lambda a, b: a + gamma * b,
@@ -159,6 +167,9 @@ class PreAccumulating(Pipeline):
                 for i in range(self.num_parts):
                     # self.precondition(self.model, self.pre_lr, i, epoch)
                     self.precondition(self.model, scheduler.get_last_lr()[0], i, epoch)
+
+            _, vloss = self.validate(self.model)
+            mlflow.log_metric("after-pre/loss", vloss, step=epoch)
 
             # Full pass
             for data in tqdm(
@@ -188,34 +199,7 @@ class PreAccumulating(Pipeline):
                 optimizer.zero_grad()
 
             # Validation
-            valid_loss = 0
-            correct = 0
-            total = 0
-            self.model.eval()
-            with torch.no_grad():
-                for data in tqdm(
-                    self.validloader,
-                    dynamic_ncols=True,
-                    leave=False,
-                    disable=self.quiet,
-                    position=2,
-                ):
-                    x = data.x.to(self.device)
-                    y = data.y.to(self.device)
-
-                    edge_index = data.edge_index.to(self.device)
-                    batch = data.batch.to(self.device)
-
-                    out = self.model(x, edge_index, batch)
-                    loss = self.model.loss(out, y)
-                    valid_loss += loss.detach().item()
-
-                    # Validation accuracy
-                    pred = out.argmax(dim=1)  # Predicted labels
-                    correct += (pred == y).sum().item()
-                    total += y.size(0)
-
-            valid_loss /= len(self.validloader)
+            accuracy, valid_loss = self.validate(self.model)
 
             scheduler.step(valid_loss)
 
@@ -227,7 +211,7 @@ class PreAccumulating(Pipeline):
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
-                    "validate/accuracy": correct / total,
+                    "validate/accuracy": accuracy,
                 },
                 step=epoch,
             )
@@ -239,3 +223,34 @@ class PreAccumulating(Pipeline):
         mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
+
+    def validate(self, model):
+        valid_loss = 0
+        correct = 0
+        total = 0
+        model.eval()
+        with torch.no_grad():
+            for data in tqdm(
+                self.validloader,
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+                position=2,
+            ):
+                x = data.x.to(self.device)
+                y = data.y.to(self.device)
+
+                edge_index = data.edge_index.to(self.device)
+                batch = data.batch.to(self.device)
+
+                out = model(x, edge_index, batch)
+                loss = model.loss(out, y)
+                valid_loss += loss.detach().item()
+
+                # Validation accuracy
+                pred = out.argmax(dim=1)  # Predicted labels
+                correct += (pred == y).sum().item()
+                total += y.size(0)
+
+        valid_loss /= len(self.validloader)
+        return correct / total, valid_loss

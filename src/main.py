@@ -176,27 +176,25 @@ def main():
             follow_batch=[f"x_{i}" for i in range(args.partitions)],
         )
 
+    # learning rates and weight decays
+    LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
     search_space = {
         "epochs": args.epochs
         if args.epochs is not None
-        else hp.uniformint("epochs", 10, 100),
-        "lr": args.lr
-        if args.lr is not None
-        else hp.loguniform("lr", np.log(1e-5), np.log(1e-2)),
-        "wd": args.wd
-        if args.wd is not None
-        else hp.loguniform("wd", np.log(1e-5), np.log(1e-2)),
+        else 10 * hp.uniformint("epochs", 1, 10),
+        "lr": args.lr if args.lr is not None else hp.choice("lr", LRnWDs),
+        "wd": args.wd if args.wd is not None else hp.choice("wd", LRnWDs),
         **(
             {
                 "pre_epochs": args.pre_epochs
                 if args.pre_epochs is not None
-                else hp.uniformint("pre_epochs", 1, 40),
-                "pre_lr": args.pre_lr
-                if args.pre_lr is not None
-                else hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
+                else 5 * hp.uniformint("pre_epochs", 1, 8),
+                # "pre_lr": args.pre_lr
+                # if args.pre_lr is not None
+                # else hp.choice("pre_lr", LRnWDs),
                 "pre_wd": args.pre_wd
                 if args.pre_wd is not None
-                else hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-3)),
+                else hp.choice("pre_wd", LRnWDs),
             }
             if has_pre
             else {}
@@ -211,7 +209,7 @@ def main():
             name += "AS_"  # Additive
         else:
             name += "MS_"  # Multiplicative
-    name += f"{args.model}_p{args.partitions}_s{args.seed}"
+    name += f"{args.model}_p{args.partitions}_s{args.seed}_{args.pipeline}"
 
     def objective(params):
         model = MODELS[args.model](
@@ -221,7 +219,16 @@ def main():
         )
 
         with mlflow.start_run(run_name=name, nested=True):
-            mlflow.log_params(params)
+            mlflow.log_params(
+                {
+                    "seed": args.seed,
+                    "pipeline": args.pipeline,
+                    "model": args.model,
+                    "dataset": args.dataset,
+                    "batch": args.batch,
+                    **params,
+                }
+            )
             pipeline = PIPELINES[args.pipeline](
                 name=name,
                 model=model,
@@ -240,17 +247,9 @@ def main():
             mlflow.pytorch.log_model(pipeline.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
+    # TODO: add hardware metrics
     mlflow.set_experiment("graph-partitioning")
     with mlflow.start_run(run_name=f"{args.dataset}_{name}"):
-        mlflow.log_params(
-            {
-                "seed": args.seed,
-                "pipeline": args.pipeline,
-                "model": args.model,
-                "dataset": args.dataset,
-                "batch": args.batch,
-            }
-        )
         trials = Trials()
         best = fmin(
             fn=objective,
