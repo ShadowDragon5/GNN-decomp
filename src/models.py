@@ -124,7 +124,7 @@ class GCN_NODE(nn.Module):
         weight = (V - cluster_sizes).float() / V
         weight *= (cluster_sizes > 0).float()
 
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=weight)
         return criterion(pred, label)
 
 
