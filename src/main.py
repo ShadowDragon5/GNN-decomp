@@ -1,5 +1,6 @@
 import argparse
 import random
+from datetime import datetime
 from logging import warning
 from os import makedirs
 from pathlib import Path
@@ -12,27 +13,21 @@ from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
-from models import GCN, GCN_NODE
-from pipelines.accumulating import Accumulating
-from pipelines.batched import Batched
-from pipelines.common import Pipeline
-from pipelines.pre_accumulating import PreAccumulating
+from models import GCN_CG, GCN_CN
+from trainers import Accumulating, Batched, Preconditioned, Trainer
 from utils import partition_transform_global, position_transform
 
-DATASET_DIR = Path("./datasets")
-
 MODELS = {
-    "GCN_SuperPix": lambda **kwargs: GCN(hidden_dim=146, out_dim=146, **kwargs),
-    "GCN_Pattern": lambda **kwargs: GCN_NODE(hidden_dim=146, out_dim=146, **kwargs),
-    "GCN_WikiCS": lambda **kwargs: GCN(hidden_dim=120, out_dim=120, **kwargs),
+    "GCN_SuperPix": lambda **kwargs: GCN_CG(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_Pattern": lambda **kwargs: GCN_CN(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
 }
 
-PIPELINES: dict[str, Type[Pipeline] | Callable[..., Pipeline]] = {
+TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "batched": Batched,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
-    "pre-accumulating": PreAccumulating,
-    # "pre-batched": PreBatched,
-    "pre-batched": lambda **kwargs: PreAccumulating(batched=True, **kwargs),
+    "pre-accumulating": Preconditioned,
+    "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
 }
 
 DATASETS = [
@@ -67,9 +62,10 @@ def parse_arguments() -> argparse.Namespace:
         help="max evaluations for hyperopt search",
     )
     parser.add_argument("-name", type=str)
+    parser.add_argument("-data_dir", type=str, default="./datasets")
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN_SuperPix")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
-    parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
+    parser.add_argument("-pipeline", choices=TRAINERS.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
     parser.add_argument("-batch", type=int, default=128)
@@ -99,9 +95,9 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_data(dataset: str, preprocessing, reload: bool):
+def load_data(dataset: str, preprocessing, reload: bool, root: str):
     trainset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="train",
         pre_transform=preprocessing,
@@ -109,7 +105,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
     )
 
     validset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="val",
         pre_transform=preprocessing,
@@ -117,7 +113,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
     )
 
     testset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="test",
         pre_transform=preprocessing,
@@ -129,6 +125,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
 
 def main():
     args = parse_arguments()
+    dataset_dir = Path(args.data_dir)
 
     makedirs("saves", exist_ok=True)
     makedirs("results", exist_ok=True)
@@ -151,6 +148,7 @@ def main():
         args.dataset,
         None if args.dataset == "PATTERN" else position_transform,
         reload=args.u,
+        root=str(dataset_dir),
     )
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
@@ -160,7 +158,7 @@ def main():
     has_pre = args.partitions > 1
     if has_pre:
         partset = GNNBenchmarkDataset(
-            root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
+            root=str(dataset_dir / f"partitioned_{args.partitions}"),
             name=args.dataset,
             split="train",
             pre_transform=lambda data: partition_transform_global(
@@ -176,27 +174,25 @@ def main():
             follow_batch=[f"x_{i}" for i in range(args.partitions)],
         )
 
+    # learning rates and weight decays
+    LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
     search_space = {
         "epochs": args.epochs
         if args.epochs is not None
-        else hp.uniformint("epochs", 10, 100),
-        "lr": args.lr
-        if args.lr is not None
-        else hp.loguniform("lr", np.log(1e-5), np.log(1e-2)),
-        "wd": args.wd
-        if args.wd is not None
-        else hp.loguniform("wd", np.log(1e-5), np.log(1e-2)),
+        else 10 * hp.uniformint("epochs", 1, 10),
+        "lr": args.lr if args.lr is not None else hp.choice("lr", LRnWDs),
+        "wd": args.wd if args.wd is not None else hp.choice("wd", LRnWDs),
         **(
             {
                 "pre_epochs": args.pre_epochs
                 if args.pre_epochs is not None
-                else hp.uniformint("pre_epochs", 1, 100),
-                "pre_lr": args.pre_lr
-                if args.pre_lr is not None
-                else hp.loguniform("pre_lr", np.log(1e-6), np.log(1e-2)),
+                else 5 * hp.uniformint("pre_epochs", 1, 8),
+                # "pre_lr": args.pre_lr
+                # if args.pre_lr is not None
+                # else hp.choice("pre_lr", LRnWDs),
                 "pre_wd": args.pre_wd
                 if args.pre_wd is not None
-                else hp.loguniform("pre_wd", np.log(1e-5), np.log(1e-3)),
+                else hp.choice("pre_wd", LRnWDs),
             }
             if has_pre
             else {}
@@ -211,7 +207,7 @@ def main():
             name += "AS_"  # Additive
         else:
             name += "MS_"  # Multiplicative
-    name += f"{args.model}_p{args.partitions}_s{args.seed}"
+    name += f"{args.model}_p{args.partitions}_s{args.seed}_{args.pipeline}"
 
     def objective(params):
         model = MODELS[args.model](
@@ -221,8 +217,17 @@ def main():
         )
 
         with mlflow.start_run(run_name=name, nested=True):
-            mlflow.log_params(params)
-            pipeline = PIPELINES[args.pipeline](
+            mlflow.log_params(
+                {
+                    "seed": args.seed,
+                    "pipeline": args.pipeline,
+                    "model": args.model,
+                    "dataset": args.dataset,
+                    "batch": args.batch,
+                    **params,
+                }
+            )
+            pipeline = TRAINERS[args.pipeline](
                 name=name,
                 model=model,
                 trainloader=trainloader,
@@ -240,17 +245,9 @@ def main():
             mlflow.pytorch.log_model(pipeline.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
-    mlflow.set_experiment("graph-partitioning")
+    # TODO: add hardware metrics
+    mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
     with mlflow.start_run(run_name=f"{args.dataset}_{name}"):
-        mlflow.log_params(
-            {
-                "seed": args.seed,
-                "pipeline": args.pipeline,
-                "model": args.model,
-                "dataset": args.dataset,
-                "batch": args.batch,
-            }
-        )
         trials = Trials()
         best = fmin(
             fn=objective,
@@ -258,6 +255,7 @@ def main():
             algo=tpe.suggest,
             max_evals=args.max_evals,
             trials=trials,
+            show_progressbar=False,
         )
 
         if best is not None:

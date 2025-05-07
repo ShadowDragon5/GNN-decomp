@@ -2,14 +2,11 @@ import mlflow
 import torch
 from tqdm import tqdm
 
-from pipelines.common import Pipeline
+from .common import Trainer
 
 
-class Batched(Pipeline):
-    """
-    State of the art re-implementation from (Dwivedi et al., 2022).
-    Mini batches of full graphs.
-    """
+class Accumulating(Trainer):
+    """Full graph, gradient accumulation variation"""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -34,7 +31,7 @@ class Batched(Pipeline):
 
             for data in tqdm(
                 self.trainloader,
-                desc=f"Epoch: {epoch:02}",
+                desc=f"Epoch: {epoch:03}",
                 dynamic_ncols=True,
                 disable=self.quiet,
             ):
@@ -44,14 +41,16 @@ class Batched(Pipeline):
                 edge_index = data.edge_index.to(self.device)
                 batch = data.batch.to(self.device)
 
-                optimizer.zero_grad()
                 out = self.model(x, edge_index, batch)
                 loss = self.model.loss(out, y)
 
                 train_loss += loss.detach().item()
 
+                loss = loss / len(self.trainloader)
                 loss.backward()
-                optimizer.step()
+
+            optimizer.step()
+            optimizer.zero_grad()
 
             train_loss /= len(self.trainloader)
 
@@ -61,7 +60,9 @@ class Batched(Pipeline):
             total = 0
             self.model.eval()
             with torch.no_grad():
-                for data in tqdm(self.validloader, dynamic_ncols=True):
+                for data in tqdm(
+                    self.validloader, dynamic_ncols=True, disable=self.quiet
+                ):
                     x = data.x.to(self.device)
                     y = data.y.to(self.device)
 
@@ -94,7 +95,9 @@ class Batched(Pipeline):
             )
 
         accuracy = self.test()
-        print(f"{self.name} Accuracy: {accuracy}")
+        if not self.quiet:
+            print(f"{self.name} Accuracy: {accuracy}")
+
         mlflow.log_metric("test/accuracy", accuracy)
 
         return accuracy
