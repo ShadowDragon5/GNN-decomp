@@ -19,8 +19,6 @@ from pipelines.common import Pipeline
 from pipelines.pre_accumulating import PreAccumulating
 from utils import partition_transform_global, position_transform
 
-DATASET_DIR = Path("./datasets")
-
 MODELS = {
     "GCN_SuperPix": lambda **kwargs: GCN(hidden_dim=146, out_dim=146, **kwargs),
     "GCN_Pattern": lambda **kwargs: GCN_NODE(hidden_dim=146, out_dim=146, **kwargs),
@@ -67,6 +65,7 @@ def parse_arguments() -> argparse.Namespace:
         help="max evaluations for hyperopt search",
     )
     parser.add_argument("-name", type=str)
+    parser.add_argument("-data_dir", type=str, default="./datasets")
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN_SuperPix")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
     parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
@@ -99,9 +98,9 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_data(dataset: str, preprocessing, reload: bool):
+def load_data(dataset: str, preprocessing, reload: bool, root: str):
     trainset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="train",
         pre_transform=preprocessing,
@@ -109,7 +108,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
     )
 
     validset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="val",
         pre_transform=preprocessing,
@@ -117,7 +116,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
     )
 
     testset = GNNBenchmarkDataset(
-        root=str(DATASET_DIR),
+        root=root,
         name=dataset,
         split="test",
         pre_transform=preprocessing,
@@ -129,6 +128,7 @@ def load_data(dataset: str, preprocessing, reload: bool):
 
 def main():
     args = parse_arguments()
+    dataset_dir = Path(args.data_dir)
 
     makedirs("saves", exist_ok=True)
     makedirs("results", exist_ok=True)
@@ -151,6 +151,7 @@ def main():
         args.dataset,
         None if args.dataset == "PATTERN" else position_transform,
         reload=args.u,
+        root=str(dataset_dir),
     )
     trainloader = DataLoader(trainset, batch_size=args.batch, shuffle=True)
     validloader = DataLoader(validset, batch_size=args.batch, shuffle=False)
@@ -160,7 +161,7 @@ def main():
     has_pre = args.partitions > 1
     if has_pre:
         partset = GNNBenchmarkDataset(
-            root=str(DATASET_DIR / f"partitioned_{args.partitions}"),
+            root=str(dataset_dir / f"partitioned_{args.partitions}"),
             name=args.dataset,
             split="train",
             pre_transform=lambda data: partition_transform_global(
