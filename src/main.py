@@ -1,5 +1,6 @@
 import argparse
 import random
+from datetime import datetime
 from logging import warning
 from os import makedirs
 from pathlib import Path
@@ -12,25 +13,21 @@ from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
-from models import GCN, GCN_NODE
-from pipelines.accumulating import Accumulating
-from pipelines.batched import Batched
-from pipelines.common import Pipeline
-from pipelines.pre_accumulating import PreAccumulating
+from models import GCN_CG, GCN_CN
+from trainers import Accumulating, Batched, Preconditioned, Trainer
 from utils import partition_transform_global, position_transform
 
 MODELS = {
-    "GCN_SuperPix": lambda **kwargs: GCN(hidden_dim=146, out_dim=146, **kwargs),
-    "GCN_Pattern": lambda **kwargs: GCN_NODE(hidden_dim=146, out_dim=146, **kwargs),
-    "GCN_WikiCS": lambda **kwargs: GCN(hidden_dim=120, out_dim=120, **kwargs),
+    "GCN_SuperPix": lambda **kwargs: GCN_CG(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_Pattern": lambda **kwargs: GCN_CN(hidden_dim=146, out_dim=146, **kwargs),
+    "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
 }
 
-PIPELINES: dict[str, Type[Pipeline] | Callable[..., Pipeline]] = {
+TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "batched": Batched,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
-    "pre-accumulating": PreAccumulating,
-    # "pre-batched": PreBatched,
-    "pre-batched": lambda **kwargs: PreAccumulating(batched=True, **kwargs),
+    "pre-accumulating": Preconditioned,
+    "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
 }
 
 DATASETS = [
@@ -68,7 +65,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("-data_dir", type=str, default="./datasets")
     parser.add_argument("-model", choices=MODELS.keys(), default="GCN_SuperPix")
     parser.add_argument("-dataset", choices=DATASETS, default="CIFAR10")
-    parser.add_argument("-pipeline", choices=PIPELINES.keys(), default="batched")
+    parser.add_argument("-pipeline", choices=TRAINERS.keys(), default="batched")
 
     parser.add_argument("-seed", type=int, default=42)
     parser.add_argument("-batch", type=int, default=128)
@@ -230,7 +227,7 @@ def main():
                     **params,
                 }
             )
-            pipeline = PIPELINES[args.pipeline](
+            pipeline = TRAINERS[args.pipeline](
                 name=name,
                 model=model,
                 trainloader=trainloader,
@@ -249,7 +246,7 @@ def main():
         return {"loss": loss, "status": STATUS_OK}
 
     # TODO: add hardware metrics
-    mlflow.set_experiment("graph-partitioning")
+    mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
     with mlflow.start_run(run_name=f"{args.dataset}_{name}"):
         trials = Trials()
         best = fmin(

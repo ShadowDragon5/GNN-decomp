@@ -7,8 +7,9 @@ from torch.nn import Module
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
-from pipelines.common import Pipeline
 from utils import PartitionedData
+
+from .common import Trainer
 
 
 def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
@@ -18,7 +19,7 @@ def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
             a[key] = fun(a[key]) if b is None else fun(a[key], b[key])
 
 
-class PreAccumulating(Pipeline):
+class Preconditioned(Trainer):
     """Partitioned graph preconditioner, gradient accumulation variation"""
 
     def __init__(

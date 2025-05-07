@@ -4,8 +4,8 @@ import torch
 from torch_geometric.loader import DataLoader
 
 
-class Pipeline(ABC):
-    """A wrapper to unify pipeline signature"""
+class Trainer(ABC):
+    """A wrapper to unify trainer signature"""
 
     def __init__(
         self,
