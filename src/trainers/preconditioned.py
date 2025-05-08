@@ -85,12 +85,14 @@ class Preconditioned(Trainer):
                 pre_optimizer.zero_grad()
             pre_scheduler.step(pre_train_loss)
 
-            if pre_epoch % 20 == 0:
-                _, vloss = self.validate(self.model)
-                mlflow.log_metric(
-                    "pre/loss",
-                    vloss,
-                    step=(i + epoch * self.num_parts) * self.pre_epochs + pre_epoch,
+            if pre_epoch % 19 == 0:
+                acc, vloss = self.validate(self.model)
+                mlflow.log_metrics(
+                    {
+                        f"pre_{i}/loss": vloss,
+                        f"pre_{i}/acc": acc,
+                    },
+                    step=epoch * self.pre_epochs + pre_epoch,
                 )
 
             mlflow.log_metrics(
@@ -121,6 +123,16 @@ class Preconditioned(Trainer):
         for epoch in range(self.epochs):
             train_loss = 0
             self.model.train()
+
+            # LOGGING
+            acc, vloss = self.validate(self.model)
+            mlflow.log_metrics(
+                {
+                    "before_pre/loss": vloss,
+                    "before_pre/acc": acc,
+                },
+                step=epoch,
+            )
 
             # Preconditioning step
             if self.ASM:  # Additive Schwarz
@@ -169,8 +181,15 @@ class Preconditioned(Trainer):
                     # self.precondition(self.model, self.pre_lr, i, epoch)
                     self.precondition(self.model, scheduler.get_last_lr()[0], i, epoch)
 
-            _, vloss = self.validate(self.model)
-            mlflow.log_metric("after-pre/loss", vloss, step=epoch)
+            # LOGGING
+            acc, vloss = self.validate(self.model)
+            mlflow.log_metrics(
+                {
+                    "after_pre/loss": vloss,
+                    "after_pre/acc": acc,
+                },
+                step=epoch,
+            )
 
             # Full pass
             for data in tqdm(
