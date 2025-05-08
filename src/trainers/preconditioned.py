@@ -27,9 +27,9 @@ class Preconditioned(Trainer):
         pre_epochs: int,
         part_trainloader: DataLoader,
         num_parts: int,
-        pre_wd: float,
         ASM: bool,
         pre_lr: float = 0,
+        pre_wd: float = 0,
         batched: bool = False,
         **kwargs,
     ) -> None:

@@ -1,0 +1,3 @@
+data_dir: ~/scratch/datasets
+batch: 4096
+q: true

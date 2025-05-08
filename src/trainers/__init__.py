@@ -1,5 +1,4 @@
-from trainers.accumulating import Accumulating
-from trainers.batched import Batched
-from trainers.common import Trainer
-from trainers.pre_accumulating import Preconditioned
-
+from .accumulating import Accumulating
+from .batched import Batched
+from .common import Trainer
+from .preconditioned import Preconditioned

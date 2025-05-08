@@ -19,7 +19,8 @@ class PartitionedData(Data):
         return getattr(self, f"edge_index_{i}").to(device)
 
     def get_batch(self, i, device):
-        if (batch := getattr(self, f"batch_{i}", None)) is not None:
+        # if (batch := getattr(self, f"batch_{i}", None)) is not None:
+        if (batch := getattr(self, f"x_{i}_batch", None)) is not None:
             return batch.to(device)
         # datasets like PATTERN don't have batch masks
         return None
