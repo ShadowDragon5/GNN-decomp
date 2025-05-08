@@ -1,0 +1,7 @@
+defaults:
+  - cifar10_base
+  - _self_
+
+name: PreB
+trainer: pre-batched
+partitions: 2

@@ -1,0 +1,7 @@
+defaults:
+  - pattern_base
+  - _self_
+
+name: Pre
+trainer: pre-accumulating
+partitions: 2

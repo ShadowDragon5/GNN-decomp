@@ -1,0 +1,10 @@
+defaults:
+  - base
+  - _self_
+  - model: GCN_Pattern
+  - dev: local
+
+name: Baseline
+dataset: PATTERN
+trainer: batched
+partitions: 1
