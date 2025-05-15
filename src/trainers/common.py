@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 from torch_geometric.loader import DataLoader
+from tqdm import tqdm
 
 
 class Trainer(ABC):
@@ -36,6 +37,41 @@ class Trainer(ABC):
     def run(self) -> float:
         """Main training loop"""
         pass
+
+    def validate(self, model) -> tuple[float, float]:
+        """
+        Validates the model
+        returns: (accuracy, loss)
+        """
+        valid_loss = 0
+        correct = 0
+        total = 0
+        model.eval()
+        with torch.no_grad():
+            for data in tqdm(
+                self.validloader,
+                desc="Validation",
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+            ):
+                x = data.x.to(self.device)
+                y = data.y.to(self.device)
+
+                edge_index = data.edge_index.to(self.device)
+                batch = data.batch.to(self.device)
+
+                out = model(x, edge_index, batch)
+                loss = model.loss(out, y)
+                valid_loss += loss.detach().item()
+
+                # Validation accuracy
+                pred = out.argmax(dim=1)  # Predicted labels
+                correct += (pred == y).sum().item()
+                total += y.size(0)
+
+        valid_loss /= len(self.validloader)
+        return correct / total, valid_loss
 
     def test(self) -> float:
         self.model.eval()

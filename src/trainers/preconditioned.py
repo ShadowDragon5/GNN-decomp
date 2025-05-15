@@ -82,8 +82,11 @@ class Preconditioned(Trainer):
                 out = model(x, edge_index, batch)
                 loss = model.loss(out, y)
 
-                loss = loss / len(self.part_trainloader)
                 pre_train_loss += loss.detach().item()
+
+                if not self.batched:
+                    loss = loss / len(self.part_trainloader)
+
                 loss.backward()
                 if self.batched:
                     pre_optimizer.step()
@@ -92,10 +95,12 @@ class Preconditioned(Trainer):
             if not self.batched:
                 pre_optimizer.step()
                 pre_optimizer.zero_grad()
+
+            pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
             if pre_epoch % 19 == 0:
-                acc, vloss = self.validate(self.model)
+                acc, vloss = self.validate(model)
                 mlflow.log_metrics(
                     {
                         f"pre_{i}/loss": vloss,
@@ -250,8 +255,11 @@ class Preconditioned(Trainer):
                 out = self.model(x, edge_index, batch)
                 loss = self.model.loss(out, y)
 
-                loss = loss / len(self.trainloader)
                 train_loss += loss.detach().item()
+
+                if not self.batched:
+                    loss = loss / len(self.trainloader)
+
                 loss.backward()
                 if self.batched:
                     optimizer.step()
@@ -260,6 +268,8 @@ class Preconditioned(Trainer):
             if not self.batched:
                 optimizer.step()
                 optimizer.zero_grad()
+
+            train_loss /= len(self.trainloader)
 
             # Validation
             accuracy, valid_loss = self.validate(self.model)
@@ -286,39 +296,3 @@ class Preconditioned(Trainer):
         mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
-
-    def validate(self, model) -> tuple[float, float]:
-        """
-        Validates the model
-        returns: (accuracy, loss)
-        """
-        valid_loss = 0
-        correct = 0
-        total = 0
-        model.eval()
-        with torch.no_grad():
-            for data in tqdm(
-                self.validloader,
-                desc="Validation",
-                dynamic_ncols=True,
-                leave=False,
-                disable=self.quiet,
-                postfix=f"corr: {correct}",
-            ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
-
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
-                out = model(x, edge_index, batch)
-                loss = model.loss(out, y)
-                valid_loss += loss.detach().item()
-
-                # Validation accuracy
-                pred = out.argmax(dim=1)  # Predicted labels
-                correct += (pred == y).sum().item()
-                total += y.size(0)
-
-        valid_loss /= len(self.validloader)
-        return correct / total, valid_loss

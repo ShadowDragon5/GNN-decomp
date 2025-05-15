@@ -9,3 +9,4 @@ name: Baseline
 dataset: CIFAR10
 trainer: batched
 partitions: 1
+epochs: 1000

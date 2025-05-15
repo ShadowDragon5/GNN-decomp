@@ -121,12 +121,12 @@ def main(cfg: DictConfig):
     LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
     # ruff: noqa: E712
     search_space = {
-        "lr": cfg.model.lr if cfg.model.lr != False else hp.choice("lr", LRnWDs),
-        "wd": cfg.model.wd if cfg.model.wd != False else hp.choice("wd", LRnWDs),
+        "lr": cfg.model.lr if cfg.model.lr != True else hp.choice("lr", LRnWDs),
+        "wd": cfg.model.wd if cfg.model.wd != True else hp.choice("wd", LRnWDs),
         **(
             {
                 "pre_epochs": cfg.pre_epochs
-                if cfg.pre_epochs != False
+                if cfg.pre_epochs != True
                 else 5 * hp.uniformint("pre_epochs", 1, 8),
                 "pre_lr": cfg.model.pre_lr,
                 # if args.pre_lr is not None
