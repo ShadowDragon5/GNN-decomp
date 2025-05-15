@@ -39,8 +39,6 @@ DATASETS = [
     # "CSL",
 ]
 
-# ruff: noqa: E712
-
 
 def load_data(dataset: str, preprocessing, reload: bool, root: str):
     trainset = GNNBenchmarkDataset(
@@ -121,6 +119,7 @@ def main(cfg: DictConfig):
 
     # learning rates and weight decays
     LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
+    # ruff: noqa: E712
     search_space = {
         "lr": cfg.model.lr if cfg.model.lr != False else hp.choice("lr", LRnWDs),
         "wd": cfg.model.wd if cfg.model.wd != False else hp.choice("wd", LRnWDs),
@@ -168,6 +167,8 @@ def main(cfg: DictConfig):
                     "model": cfg.model.base,
                     "dataset": cfg.dataset,
                     "batch": cfg.dev.batch,
+                    "epochs": cfg.epochs,
+                    "additive": cfg.ASM,
                     **params,
                 }
             )

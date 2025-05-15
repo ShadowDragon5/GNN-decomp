@@ -34,6 +34,7 @@ class Trainer(ABC):
 
     @abstractmethod
     def run(self) -> float:
+        """Main training loop"""
         pass
 
     def test(self) -> float:

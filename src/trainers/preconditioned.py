@@ -1,8 +1,9 @@
 from copy import deepcopy
-from typing import Callable
+from typing import Any, Callable
 
 import mlflow
 import torch
+from scipy.optimize import minimize_scalar
 from torch.nn import Module
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
@@ -13,7 +14,7 @@ from .common import Trainer
 
 
 def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
-    """Apply `fun` to `a` model state dictionary"""
+    """Apply `fun` to `a` model state dictionary (inplace)"""
     for key in a:
         if a[key].data.dtype == torch.float:
             a[key] = fun(a[key]) if b is None else fun(a[key], b[key])
@@ -42,7 +43,15 @@ class Preconditioned(Trainer):
         self.ASM = ASM
         self.batched = batched
 
-    def precondition(self, model: Module, lr: float, i: int, epoch: int) -> Module:
+    def precondition(
+        self, model: Module, lr: float, i: int, epoch: int
+    ) -> dict[str, Any]:
+        """
+        returns: difference in model weights after the preconditioning
+        """
+        model = deepcopy(model).to(self.device)
+        weights_0 = deepcopy(model.state_dict())
+
         pre_optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, weight_decay=self.pre_wd
         )
@@ -102,10 +111,17 @@ class Preconditioned(Trainer):
                 },
                 step=epoch * self.pre_epochs + pre_epoch,
             )
-        return model
+
+        # computing the weight difference
+        delta_w = deepcopy(model.state_dict())
+        apply_to_models(
+            delta_w,
+            lambda a, b: a - b,
+            weights_0,
+        )
+        return delta_w
 
     def run(self) -> float:
-        """Main training loop"""
         optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
@@ -135,27 +151,33 @@ class Preconditioned(Trainer):
             )
 
             # Preconditioning step
+            w_0 = deepcopy(self.model.state_dict())
+
+            def objective(gamma: float, delta_w: dict):
+                model = deepcopy(self.model).to(self.device)
+                w_new = deepcopy(w_0)
+                apply_to_models(
+                    w_new,
+                    lambda a, b: a + gamma * b,
+                    delta_w,
+                )
+                model.load_state_dict(w_new)
+                _, loss = self.validate(model)
+                return loss
+
             if self.ASM:  # Additive Schwarz
+                # FIXME: update
                 models = []
-                w_0 = self.model.state_dict()
 
                 for i in range(self.num_parts):
-                    # w_k = self.precondition(
-                    #     deepcopy(self.model).to(self.device), self.pre_lr, i, epoch
-                    # ).state_dict()
-                    w_k = self.precondition(
-                        deepcopy(self.model).to(self.device),
-                        scheduler.get_last_lr()[0],
+                    delta_w = self.precondition(
+                        self.model,
+                        # self.pre_lr,
+                        scheduler.get_last_lr()[0],  # pass down the lr
                         i,
                         epoch,
-                    ).state_dict()
-
-                    apply_to_models(
-                        w_k,
-                        lambda a, b: a - b,
-                        w_0,
                     )
-                    models.append(w_k)
+                    models.append(delta_w)
 
                 # # average model weights
                 # w_avg = models[0]
@@ -165,7 +187,7 @@ class Preconditioned(Trainer):
                 #             w_avg[key].data += m[key].data.clone()
                 #         w_avg[key] /= len(models)
 
-                w_avg = w_0
+                w_avg = deepcopy(w_0)
                 for m in models:
                     gamma = 1 / len(models)
                     apply_to_models(
@@ -178,8 +200,29 @@ class Preconditioned(Trainer):
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
-                    # self.precondition(self.model, self.pre_lr, i, epoch)
-                    self.precondition(self.model, scheduler.get_last_lr()[0], i, epoch)
+                    delta_w = self.precondition(
+                        self.model,
+                        # self.pre_lr,
+                        scheduler.get_last_lr()[0],  # pass down the lr
+                        i,
+                        epoch,
+                    )
+                    gamma = minimize_scalar(
+                        lambda gamma: objective(gamma, delta_w),
+                        bounds=(0, 1),
+                        method="bounded",
+                        options={
+                            "maxiter": 10,
+                            "xatol": 1e-3,
+                        },
+                    ).x  # type: ignore
+                    w_new = deepcopy(w_0)
+                    apply_to_models(
+                        w_new,
+                        lambda a, b: a + gamma * b,
+                        delta_w,
+                    )
+                    self.model.load_state_dict(w_new)
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -244,7 +287,11 @@ class Preconditioned(Trainer):
 
         return valid_loss
 
-    def validate(self, model):
+    def validate(self, model) -> tuple[float, float]:
+        """
+        Validates the model
+        returns: (accuracy, loss)
+        """
         valid_loss = 0
         correct = 0
         total = 0
@@ -252,10 +299,11 @@ class Preconditioned(Trainer):
         with torch.no_grad():
             for data in tqdm(
                 self.validloader,
+                desc="Validation",
                 dynamic_ncols=True,
                 leave=False,
                 disable=self.quiet,
-                position=2,
+                postfix=f"corr: {correct}",
             ):
                 x = data.x.to(self.device)
                 y = data.y.to(self.device)
