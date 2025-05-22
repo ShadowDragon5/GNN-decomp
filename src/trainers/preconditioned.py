@@ -214,20 +214,6 @@ class Preconditioned(Trainer):
             )
 
             # Preconditioning step
-            w_0 = deepcopy(self.model.state_dict())
-
-            # def objective(gamma: float, delta_w: dict):
-            #     model = deepcopy(self.model).to(self.device)
-            #     w_new = deepcopy(w_0)
-            #     apply_to_models(
-            #         w_new,
-            #         lambda a, b: a + gamma * b,
-            #         delta_w,
-            #     )
-            #     model.load_state_dict(w_new)
-            #     _, loss = self.validate(model)
-            #     return loss
-
             if self.ASM:  # Additive Schwarz
                 # FIXME: update
                 models = []
@@ -242,17 +228,26 @@ class Preconditioned(Trainer):
                     )
                     models.append(delta_w)
 
-                # average model weights
-                w_avg = deepcopy(w_0)
-                for m in models:
-                    gamma = 1 / len(models)
-                    apply_to_models(
-                        w_avg,
-                        lambda a, b: a + gamma * b,
-                        m,
+                # w_avg = deepcopy(w_0)
+                for i, delta_w in enumerate(models):
+                    # gamma = 1 / len(models)
+                    # apply_to_models(
+                    #     w_avg,
+                    #     lambda a, b: a + gamma * b,
+                    #     delta_w,
+                    # )
+                    # NOTE: combines contributions one at a time
+                    w_new, gamma = self.optimal_combination(self.model, delta_w)
+
+                    self.model.load_state_dict(w_new)
+                    mlflow.log_metrics(
+                        {
+                            f"gamma/p{i}": gamma,
+                        },
+                        step=epoch,
                     )
 
-                self.model.load_state_dict(w_avg)
+                # self.model.load_state_dict(w_avg)
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
