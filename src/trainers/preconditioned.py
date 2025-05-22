@@ -16,6 +16,7 @@ from .common import Trainer
 class LS_ALGO(Enum):
     """Line Search algorithm"""
 
+    NONE = "none"
     BACKTRACKING = "backtracking"
     BRENT = "brent"
 
@@ -143,7 +144,7 @@ class Preconditioned(Trainer):
         Uses line search algorithms to find the weight gamma with which the contribution will be added.
         """
         weights = deepcopy(model.state_dict())
-        model = deepcopy(model).to(model.device)
+        model = deepcopy(model).to(self.device)
 
         # HACK
         def objective(gamma: float):
@@ -228,26 +229,29 @@ class Preconditioned(Trainer):
                     )
                     models.append(delta_w)
 
-                # w_avg = deepcopy(w_0)
+                w_avg = deepcopy(self.model.state_dict())
                 for i, delta_w in enumerate(models):
-                    # gamma = 1 / len(models)
-                    # apply_to_models(
-                    #     w_avg,
-                    #     lambda a, b: a + gamma * b,
-                    #     delta_w,
-                    # )
-                    # NOTE: combines contributions one at a time
-                    w_new, gamma = self.optimal_combination(self.model, delta_w)
+                    if self.ls_algo == LS_ALGO.NONE:
+                        gamma = 1 / len(models)
+                        apply_to_models(
+                            w_avg,
+                            lambda a, b: a + gamma * b,
+                            delta_w,
+                        )
+                    else:
+                        # NOTE: combines contributions one at a time
+                        w_new, gamma = self.optimal_combination(self.model, delta_w)
 
-                    self.model.load_state_dict(w_new)
-                    mlflow.log_metrics(
-                        {
-                            f"gamma/p{i}": gamma,
-                        },
-                        step=epoch,
-                    )
+                        self.model.load_state_dict(w_new)
+                        mlflow.log_metrics(
+                            {
+                                f"gamma/p{i}": gamma,
+                            },
+                            step=epoch,
+                        )
 
-                # self.model.load_state_dict(w_avg)
+                if self.ls_algo == LS_ALGO.NONE:
+                    self.model.load_state_dict(w_avg)
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):

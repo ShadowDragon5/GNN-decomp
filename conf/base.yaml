@@ -9,6 +9,7 @@ max_evals: 1
 pre_epochs: 40
 # Additive Schwarz flag (defaults to Multiplicative Schwarz)
 ASM: false
+ls_algo: none
 
 seed: 42
 epochs: 100
