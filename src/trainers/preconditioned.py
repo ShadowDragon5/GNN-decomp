@@ -1,4 +1,5 @@
 from copy import deepcopy
+from enum import Enum
 from typing import Any, Callable
 
 import mlflow
@@ -7,10 +8,16 @@ from scipy.optimize import minimize_scalar
 from torch.nn import Module
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
-
 from utils import PartitionedData
 
 from .common import Trainer
+
+
+class LS_ALGO(Enum):
+    """Line Search algorithm"""
+
+    BACKTRACKING = "backtracking"
+    BRENT = "brent"
 
 
 def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
@@ -32,6 +39,7 @@ class Preconditioned(Trainer):
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
+        ls_algo: LS_ALGO = LS_ALGO.BACKTRACKING,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -42,6 +50,7 @@ class Preconditioned(Trainer):
         self.pre_wd = pre_wd
         self.ASM = ASM
         self.batched = batched
+        self.ls_algo = ls_algo
 
     def precondition(
         self, model: Module, lr: float, i: int, epoch: int
@@ -126,6 +135,55 @@ class Preconditioned(Trainer):
         )
         return delta_w
 
+    def optimal_combination(
+        self, model: torch.nn.Module, contribution: dict[str, Any]
+    ) -> tuple[dict[str, Any], float]:
+        """
+        Combines model weights with contribution in the most optimal way.
+        Uses line search algorithms to find the weight gamma with which the contribution will be added.
+        """
+        weights = deepcopy(model.state_dict())
+        model = deepcopy(model).to(model.device)
+
+        # HACK
+        def objective(gamma: float):
+            w_new = deepcopy(weights)
+            apply_to_models(
+                w_new,
+                lambda a, b: a + gamma * b,
+                contribution,
+            )
+            model.load_state_dict(w_new)
+            _, loss = self.validate(model)
+            return loss
+
+        gamma = 1.0
+        if self.ls_algo == LS_ALGO.BRENT:
+            gamma = minimize_scalar(
+                objective,
+                bounds=(0, 1),
+                method="bounded",
+                options={
+                    "maxiter": 10,
+                    "xatol": 1e-3,
+                },
+            ).x  # type: ignore
+
+        elif self.ls_algo == LS_ALGO.BACKTRACKING:
+            beta = 0.5
+            _, fx = self.validate(model)
+            for _ in range(10):
+                if objective(gamma) < fx:
+                    break
+                gamma *= beta
+
+        apply_to_models(
+            weights,
+            lambda a, b: a + gamma * b,
+            contribution,
+        )
+        return weights, gamma
+
     def run(self) -> float:
         optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
@@ -158,17 +216,17 @@ class Preconditioned(Trainer):
             # Preconditioning step
             w_0 = deepcopy(self.model.state_dict())
 
-            def objective(gamma: float, delta_w: dict):
-                model = deepcopy(self.model).to(self.device)
-                w_new = deepcopy(w_0)
-                apply_to_models(
-                    w_new,
-                    lambda a, b: a + gamma * b,
-                    delta_w,
-                )
-                model.load_state_dict(w_new)
-                _, loss = self.validate(model)
-                return loss
+            # def objective(gamma: float, delta_w: dict):
+            #     model = deepcopy(self.model).to(self.device)
+            #     w_new = deepcopy(w_0)
+            #     apply_to_models(
+            #         w_new,
+            #         lambda a, b: a + gamma * b,
+            #         delta_w,
+            #     )
+            #     model.load_state_dict(w_new)
+            #     _, loss = self.validate(model)
+            #     return loss
 
             if self.ASM:  # Additive Schwarz
                 # FIXME: update
@@ -184,14 +242,7 @@ class Preconditioned(Trainer):
                     )
                     models.append(delta_w)
 
-                # # average model weights
-                # w_avg = models[0]
-                # for key in w_avg:
-                #     if w_avg[key].data.dtype == torch.float:
-                #         for m in models[1:]:
-                #             w_avg[key].data += m[key].data.clone()
-                #         w_avg[key] /= len(models)
-
+                # average model weights
                 w_avg = deepcopy(w_0)
                 for m in models:
                     gamma = 1 / len(models)
@@ -212,22 +263,15 @@ class Preconditioned(Trainer):
                         i,
                         epoch,
                     )
-                    gamma = minimize_scalar(
-                        lambda gamma: objective(gamma, delta_w),
-                        bounds=(0, 1),
-                        method="bounded",
-                        options={
-                            "maxiter": 10,
-                            "xatol": 1e-3,
-                        },
-                    ).x  # type: ignore
-                    w_new = deepcopy(w_0)
-                    apply_to_models(
-                        w_new,
-                        lambda a, b: a + gamma * b,
-                        delta_w,
-                    )
+                    w_new, gamma = self.optimal_combination(self.model, delta_w)
+
                     self.model.load_state_dict(w_new)
+                    mlflow.log_metrics(
+                        {
+                            f"gamma/p{i}": gamma,
+                        },
+                        step=epoch,
+                    )
 
             # LOGGING
             acc, vloss = self.validate(self.model)

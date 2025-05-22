@@ -188,14 +188,14 @@ def main(cfg: DictConfig):
             )
             loss = trainer.run()
 
-            mlflow.pytorch.log_model(trainer.model, "model")
+            # mlflow.pytorch.log_model(trainer.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
     # TODO: add hardware metrics
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
     with mlflow.start_run(run_name=f"{cfg.dataset}_{name}"):
         trials = Trials()
-        best = fmin(
+        fmin(
             fn=objective,
             space=search_space,
             algo=tpe.suggest,
@@ -204,8 +204,8 @@ def main(cfg: DictConfig):
             show_progressbar=False,
         )
 
-        if best is not None:
-            mlflow.log_params(best)
+        # if best is not None:
+        #     mlflow.log_params(best)
 
 
 if __name__ == "__main__":
