@@ -161,6 +161,7 @@ def main(cfg: DictConfig):
                     "epochs": cfg.epochs,
                     "additive": cfg.ASM,
                     "line search": cfg.ls_algo,
+                    "partitions": cfg.partitions,
                     **params,
                 }
             )
