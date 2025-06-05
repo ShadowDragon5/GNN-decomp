@@ -5,20 +5,23 @@ from typing import Any, Callable
 import mlflow
 import torch
 from scipy.optimize import minimize_scalar
-from torch.nn import Module
+from torch.func import functional_call
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
+
+from models.common import GNN
 from utils import PartitionedData
 
 from .common import Trainer
 
 
-class LS_ALGO(Enum):
-    """Line Search algorithm"""
+class GAMMA_ALGO(Enum):
+    """Contribution combination algorithm that determines the gamma weights"""
 
     NONE = "none"
     BACKTRACKING = "backtracking"
     BRENT = "brent"
+    SGD = "SGD"
 
 
 def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
@@ -40,7 +43,7 @@ class Preconditioned(Trainer):
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
-        ls_algo: LS_ALGO = LS_ALGO.BACKTRACKING,
+        gamma_algo: GAMMA_ALGO = GAMMA_ALGO.BACKTRACKING,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -51,11 +54,9 @@ class Preconditioned(Trainer):
         self.pre_wd = pre_wd
         self.ASM = ASM
         self.batched = batched
-        self.ls_algo = ls_algo
+        self.gamma_algo = gamma_algo
 
-    def precondition(
-        self, model: Module, lr: float, i: int, epoch: int
-    ) -> dict[str, Any]:
+    def precondition(self, model: GNN, lr: float, i: int, epoch: int) -> dict[str, Any]:
         """
         returns: difference in model weights after the preconditioning
         """
@@ -159,7 +160,7 @@ class Preconditioned(Trainer):
             return loss
 
         gamma = 1.0
-        if self.ls_algo == LS_ALGO.BRENT:
+        if self.gamma_algo == GAMMA_ALGO.BRENT:
             gamma = minimize_scalar(
                 objective,
                 bounds=(0, 1),
@@ -170,7 +171,7 @@ class Preconditioned(Trainer):
                 },
             ).x  # type: ignore
 
-        elif self.ls_algo == LS_ALGO.BACKTRACKING:
+        elif self.gamma_algo == GAMMA_ALGO.BACKTRACKING:
             beta = 0.5
             _, fx = self.validate(model)
             for _ in range(10):
@@ -216,8 +217,7 @@ class Preconditioned(Trainer):
 
             # Preconditioning step
             if self.ASM:  # Additive Schwarz
-                # FIXME: update
-                models = []
+                contributions = []
 
                 for i in range(self.num_parts):
                     delta_w = self.precondition(
@@ -227,22 +227,13 @@ class Preconditioned(Trainer):
                         i,
                         epoch,
                     )
-                    models.append(delta_w)
+                    contributions.append(delta_w)
 
-                w_avg = deepcopy(self.model.state_dict())
-                for i, delta_w in enumerate(models):
-                    if self.ls_algo == LS_ALGO.NONE:
-                        gamma = 1 / len(models)
-                        apply_to_models(
-                            w_avg,
-                            lambda a, b: a + gamma * b,
-                            delta_w,
-                        )
-                    else:
-                        # NOTE: combines contributions one at a time
-                        w_new, gamma = self.optimal_combination(self.model, delta_w)
+                # Contribution combination
+                if self.gamma_algo == GAMMA_ALGO.SGD:
+                    gammas = self.optimize_gammas(contributions, epoch)
 
-                        self.model.load_state_dict(w_new)
+                    for i, gamma in enumerate(gammas):
                         mlflow.log_metrics(
                             {
                                 f"gamma/p{i}": gamma,
@@ -250,8 +241,39 @@ class Preconditioned(Trainer):
                             step=epoch,
                         )
 
-                if self.ls_algo == LS_ALGO.NONE:
+                    w_avg = deepcopy(self.model.state_dict())
+                    for delta_w, gamma in zip(contributions, gammas):
+                        apply_to_models(
+                            w_avg,
+                            lambda a, b: a + gamma * b,
+                            delta_w,
+                        )
                     self.model.load_state_dict(w_avg)
+
+                else:
+                    w_avg = deepcopy(self.model.state_dict())
+                    for i, delta_w in enumerate(contributions):
+                        if self.gamma_algo == GAMMA_ALGO.NONE:
+                            gamma = 1 / len(contributions)  # equal weights for all
+                            apply_to_models(
+                                w_avg,
+                                lambda a, b: a + gamma * b,
+                                delta_w,
+                            )
+                        else:
+                            # NOTE: combines contributions one at a time
+                            w_new, gamma = self.optimal_combination(self.model, delta_w)
+
+                            self.model.load_state_dict(w_new)
+                            mlflow.log_metrics(
+                                {
+                                    f"gamma/p{i}": gamma,
+                                },
+                                step=epoch,
+                            )
+
+                    if self.gamma_algo == GAMMA_ALGO.NONE:
+                        self.model.load_state_dict(w_avg)
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
@@ -283,6 +305,7 @@ class Preconditioned(Trainer):
             )
 
             # Full pass
+            self.model.train()
             for data in tqdm(
                 self.trainloader,
                 desc=f"Epoch: {epoch:03}",
@@ -320,7 +343,7 @@ class Preconditioned(Trainer):
             scheduler.step(valid_loss)
 
             if not self.quiet:
-                print(f"Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss}")
 
             mlflow.log_metrics(
                 {
@@ -339,3 +362,74 @@ class Preconditioned(Trainer):
         mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
+
+    def optimize_gammas(self, contributions, global_epoch):
+        """Does a mini optimization to find the best gamma combination"""
+
+        N_EPOCHS = 10
+        gammas = torch.ones(self.num_parts, requires_grad=True)
+        gamma_optim = torch.optim.Adam([gammas], lr=0.01)
+
+        self.model.eval()
+        params = {}
+        buffers = {}
+        for key, val in self.model.state_dict().items():
+            if key in dict(self.model.named_buffers()):
+                buffers[key] = val.clone()
+            else:
+                params[key] = val.clone()
+
+        for epoch in range(N_EPOCHS):
+            gamma_optim.zero_grad()
+
+            valid_loss = 0
+            correct = 0
+            total = 0
+
+            for data in tqdm(
+                self.validloader,
+                desc=f"Eval {epoch}",
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+            ):
+                x = data.x.to(self.device)
+                y = data.y.to(self.device)
+
+                edge_index = data.edge_index.to(self.device)
+                batch = data.batch.to(self.device)
+
+                # Gamma.T * Theta
+                # rebuilding required for computational graph
+                theta = deepcopy(params)
+                for i, delta_w in enumerate(contributions):
+                    apply_to_models(
+                        theta,
+                        lambda a, b: a + gammas[i] * b,
+                        delta_w,
+                    )
+
+                out = functional_call(
+                    self.model, (theta, buffers), (x, edge_index, batch)
+                )
+                loss = self.model.loss(out, y)
+                valid_loss += loss.detach().item() / len(self.validloader)
+
+                (grad,) = torch.autograd.grad(loss, gammas)
+                gammas.grad = grad.detach()
+                gamma_optim.step()
+
+                # accuracy
+                pred = out.argmax(dim=1)  # Predicted labels
+                correct += (pred == y).sum().item()
+                total += y.size(0)
+
+            mlflow.log_metrics(
+                {
+                    "gamma_optim/loss": valid_loss,
+                    "gamma_optim/accuracy": correct / total,
+                },
+                step=epoch + N_EPOCHS * global_epoch,
+            )
+
+        return gammas.detach().cpu().numpy()

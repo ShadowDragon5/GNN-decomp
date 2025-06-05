@@ -14,7 +14,7 @@ from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
 from models import GCN_CG, GCN_CN
-from trainers import LS_ALGO, Accumulating, Batched, Preconditioned, Trainer
+from trainers import GAMMA_ALGO, Accumulating, Batched, Preconditioned, Trainer
 from utils import partition_transform_global, position_transform
 
 MODELS = {
@@ -177,7 +177,7 @@ def main(cfg: DictConfig):
                 num_parts=cfg.partitions,
                 ASM=cfg.ASM,
                 epochs=cfg.epochs,
-                ls_algo=LS_ALGO(cfg.ls_algo),
+                ls_algo=GAMMA_ALGO(cfg.ls_algo),
                 **params,
             )
             loss = trainer.run()

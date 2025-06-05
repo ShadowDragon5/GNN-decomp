@@ -4,6 +4,8 @@ import torch
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
+from models.common import GNN
+
 
 class Trainer(ABC):
     """A wrapper to unify trainer signature"""
@@ -11,7 +13,7 @@ class Trainer(ABC):
     def __init__(
         self,
         name: str,
-        model: torch.nn.Module,
+        model: GNN,
         trainloader: DataLoader,
         validloader: DataLoader,
         testloader: DataLoader,

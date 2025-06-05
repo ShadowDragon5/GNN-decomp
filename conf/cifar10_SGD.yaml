@@ -1,0 +1,10 @@
+defaults:
+  - cifar10_base
+  - _self_
+
+name: P
+trainer: pre-accumulating
+partitions: 2
+
+ASM: true
+ls_algo: SGD

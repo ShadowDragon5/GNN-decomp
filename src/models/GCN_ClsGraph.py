@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import Sequential, global_mean_pool
 
-from .common import ResidualGCNLayer
+from .common import GNN, ResidualGCNLayer
 
 
-class GCN_CG(nn.Module):
+class GCN_CG(GNN):
     def __init__(
         self,
         in_dim: int,
@@ -47,7 +47,7 @@ class GCN_CG(nn.Module):
         h = self.MLP_layer(h)
         return h
 
-    def loss(self, pred, label):
+    def loss(self, pred, label) -> torch.Tensor:
         criterion = nn.CrossEntropyLoss()
         return criterion(pred, label)
 

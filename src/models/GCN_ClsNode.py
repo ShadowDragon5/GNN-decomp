@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import Sequential
 
-from .common import ResidualGCNLayer
+from .common import GNN, ResidualGCNLayer
 
 
-class GCN_CN(nn.Module):
+class GCN_CN(GNN):
     """
     Adapted from:
     https://github.com/graphdeeplearning/benchmarking-gnns/blob/master/nets/SBMs_node_classification/gcn_net.py
@@ -50,7 +50,7 @@ class GCN_CN(nn.Module):
         h = self.MLP_layer(h)
         return h
 
-    def loss(self, pred, label):
+    def loss(self, pred, label) -> torch.Tensor:
         # weighted cross entropy for unbalanced classes
         V = label.size(0)
         label_count = torch.bincount(label)
