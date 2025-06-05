@@ -58,6 +58,8 @@ class Preconditioned(Trainer):
 
     def precondition(self, model: GNN, lr: float, i: int, epoch: int) -> dict[str, Any]:
         """
+        i: partition index
+        epoch: global epoch for logging
         returns: difference in model weights after the preconditioning
         """
         model = deepcopy(model).to(self.device)
@@ -202,9 +204,6 @@ class Preconditioned(Trainer):
 
         valid_loss = 0
         for epoch in range(self.epochs):
-            train_loss = 0
-            self.model.train()
-
             # LOGGING
             acc, vloss = self.validate(self.model)
             mlflow.log_metrics(
@@ -293,6 +292,7 @@ class Preconditioned(Trainer):
                         },
                         step=epoch,
                     )
+                    self.train(optimizer, epoch)  # TEST: 05-22 notes
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -305,37 +305,7 @@ class Preconditioned(Trainer):
             )
 
             # Full pass
-            self.model.train()
-            for data in tqdm(
-                self.trainloader,
-                desc=f"Epoch: {epoch:03}",
-                dynamic_ncols=True,
-                disable=self.quiet,
-            ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
-
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
-                out = self.model(x, edge_index, batch)
-                loss = self.model.loss(out, y)
-
-                train_loss += loss.detach().item()
-
-                if not self.batched:
-                    loss = loss / len(self.trainloader)
-
-                loss.backward()
-                if self.batched:
-                    optimizer.step()
-                    optimizer.zero_grad()
-
-            if not self.batched:
-                optimizer.step()
-                optimizer.zero_grad()
-
-            train_loss /= len(self.trainloader)
+            train_loss = self.train(optimizer, epoch)
 
             # Validation
             accuracy, valid_loss = self.validate(self.model)
@@ -362,6 +332,42 @@ class Preconditioned(Trainer):
         mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
+
+    def train(self, optimizer, epoch):
+        """Global training step"""
+        train_loss = 0
+        self.model.train()
+        for data in tqdm(
+            self.trainloader,
+            desc=f"Epoch: {epoch:03}",
+            dynamic_ncols=True,
+            disable=self.quiet,
+        ):
+            x = data.x.to(self.device)
+            y = data.y.to(self.device)
+
+            edge_index = data.edge_index.to(self.device)
+            batch = data.batch.to(self.device)
+
+            out = self.model(x, edge_index, batch)
+            loss = self.model.loss(out, y)
+
+            train_loss += loss.detach().item()
+
+            if not self.batched:
+                loss = loss / len(self.trainloader)
+
+            loss.backward()
+            if self.batched:
+                optimizer.step()
+                optimizer.zero_grad()
+
+        if not self.batched:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        train_loss /= len(self.trainloader)
+        return train_loss
 
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
