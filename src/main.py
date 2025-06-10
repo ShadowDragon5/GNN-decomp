@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from omegaconf import DictConfig
+
+# from torch.profiler import ProfilerActivity, profile, tensorboard_trace_handler
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
@@ -116,7 +118,10 @@ def main(cfg: DictConfig):
         "wd": cfg.model.wd,  # if cfg.model.wd != True else hp.choice("wd", LRnWDs),
         **(
             {
-                "pre_epochs": cfg.pre_epochs,
+                # "pre_epochs": cfg.pre_epochs,
+                # "full_epochs": cfg.full_epochs,
+                "pre_epochs": hp.choice("pre_epochs", [5, 10, 20, 30, 40]),
+                "full_epochs": hp.choice("full_epochs", [1, 2, 3, 5, 7]),
                 # if cfg.pre_epochs != True
                 # else 5 * hp.uniformint("pre_epochs", 1, 8),
                 "pre_lr": cfg.model.pre_lr,
@@ -172,7 +177,7 @@ def main(cfg: DictConfig):
                 validloader=validloader,
                 testloader=testloader,
                 device=device,
-                quiet=cfg.q,
+                quiet=cfg.dev.q,
                 part_trainloader=part_trainloader,
                 num_parts=cfg.partitions,
                 ASM=cfg.ASM,
@@ -204,6 +209,14 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     try:
+        # with profile(
+        #     activities=[ProfilerActivity.CPU],
+        #     on_trace_ready=tensorboard_trace_handler("./log"),
+        #     with_stack=True,  # OOM
+        # ) as p:
+        #     main()
+        # # print(p.key_averages().table())
+
         main()
     except KeyboardInterrupt:
         print("Stopping...")

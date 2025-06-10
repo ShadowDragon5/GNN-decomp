@@ -2,11 +2,10 @@ defaults:
   - base
   - _self_
   - model: GCN_SuperPix
-  - dev: local
 
 name: Baseline
 
 dataset: CIFAR10
 trainer: batched
 partitions: 1
-epochs: 1000
+epochs: 300

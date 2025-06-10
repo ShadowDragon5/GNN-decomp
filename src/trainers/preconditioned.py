@@ -37,6 +37,7 @@ class Preconditioned(Trainer):
     def __init__(
         self,
         pre_epochs: int,
+        full_epochs: int,
         part_trainloader: DataLoader,
         num_parts: int,
         ASM: bool,
@@ -47,7 +48,8 @@ class Preconditioned(Trainer):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.pre_epochs = pre_epochs
+        self.pre_epochs = pre_epochs  # epochs over partitioned graph data
+        self.full_epochs = full_epochs  # epochs over full graph data
         self.num_parts = num_parts
         self.part_trainloader = part_trainloader
         self.pre_lr = pre_lr
@@ -292,7 +294,7 @@ class Preconditioned(Trainer):
                         },
                         step=epoch,
                     )
-                    self.train(optimizer, epoch)  # TEST: 05-22 notes
+                    # self.train(optimizer, epoch)  # TEST: 05-22 notes
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -305,7 +307,9 @@ class Preconditioned(Trainer):
             )
 
             # Full pass
-            train_loss = self.train(optimizer, epoch)
+            train_loss = 0
+            for _ in range(self.full_epochs):
+                train_loss = self.train(optimizer, epoch)
 
             # Validation
             accuracy, valid_loss = self.validate(self.model)
