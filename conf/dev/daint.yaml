@@ -1,3 +1,4 @@
 data_dir: ~/scratch/datasets
 batch: 4096
 q: true
+num_workers: 1

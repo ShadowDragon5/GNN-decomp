@@ -85,9 +85,27 @@ def main(cfg: DictConfig):
         reload=cfg.u,
         root=str(dataset_dir),
     )
-    trainloader = DataLoader(trainset, batch_size=cfg.dev.batch, shuffle=True)
-    validloader = DataLoader(validset, batch_size=cfg.dev.batch, shuffle=False)
-    testloader = DataLoader(testset, batch_size=cfg.dev.batch, shuffle=False)
+    trainloader = DataLoader(
+        trainset,
+        batch_size=cfg.dev.batch,
+        shuffle=True,
+        pin_memory=True,
+        num_workers=cfg.dev.num_workers,
+    )
+    validloader = DataLoader(
+        validset,
+        batch_size=cfg.dev.batch,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=cfg.dev.num_workers,
+    )
+    testloader = DataLoader(
+        testset,
+        batch_size=cfg.dev.batch,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=cfg.dev.num_workers,
+    )
 
     part_trainloader = None
     has_pre = cfg.partitions > 1
@@ -106,12 +124,14 @@ def main(cfg: DictConfig):
             partset,
             batch_size=cfg.dev.batch,
             shuffle=True,
-            # FIX: results in x_0_batch
+            # NOTE: results in x_0_batch
             follow_batch=[f"x_{i}" for i in range(cfg.partitions)],
+            pin_memory=True,
+            num_workers=cfg.dev.num_workers,
         )
 
     # learning rates and weight decays
-    LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
+    # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
     # ruff: noqa: E712
     search_space = {
         "lr": cfg.model.lr,  # if cfg.model.lr != True else hp.choice("lr", LRnWDs),
@@ -120,8 +140,8 @@ def main(cfg: DictConfig):
             {
                 # "pre_epochs": cfg.pre_epochs,
                 # "full_epochs": cfg.full_epochs,
-                "pre_epochs": hp.choice("pre_epochs", [5, 10, 20, 30, 40]),
-                "full_epochs": hp.choice("full_epochs", [1, 2, 3, 5, 7]),
+                "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
+                "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
                 # if cfg.pre_epochs != True
                 # else 5 * hp.uniformint("pre_epochs", 1, 8),
                 "pre_lr": cfg.model.pre_lr,
@@ -187,7 +207,7 @@ def main(cfg: DictConfig):
             )
             loss = trainer.run()
 
-            # mlflow.pytorch.log_model(trainer.model, "model")
+            mlflow.pytorch.log_model(trainer.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
     # TODO: add hardware metrics

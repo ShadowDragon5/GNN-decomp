@@ -1,3 +1,4 @@
 data_dir: ./datasets
 batch: 128
 q: false
+num_workers: 1

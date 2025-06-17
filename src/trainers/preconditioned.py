@@ -6,7 +6,7 @@ import mlflow
 import torch
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
-from torch.linalg import matrix_norm
+from torch.linalg import vector_norm
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -30,6 +30,19 @@ def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
     for key in a:
         if a[key].data.dtype == torch.float:
             a[key] = fun(a[key]) if b is None else fun(a[key], b[key])
+
+
+def parameter_norm(params: dict) -> float:
+    norm = vector_norm(
+        torch.cat([p.view(-1) for p in params.values() if p is not None])
+    )
+    return norm.item()
+
+
+def parameter_dot(grad: dict, params: dict) -> float:
+    a = torch.cat([g.view(-1) for g in grad.values() if g is not None])
+    b = torch.cat([params[k].view(-1) for k in grad.keys() if params[k] is not None])
+    return torch.dot(a, b).item()
 
 
 class Preconditioned(Trainer):
@@ -82,6 +95,7 @@ class Preconditioned(Trainer):
             patience=5,
         )
 
+        pre_optimizer.zero_grad()
         for pre_epoch in range(self.pre_epochs):
             pre_train_loss = 0
 
@@ -118,16 +132,16 @@ class Preconditioned(Trainer):
             pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
-            # LOGGING
-            if pre_epoch % 19 == 0:
-                acc, vloss = self.validate(model)
-                mlflow.log_metrics(
-                    {
-                        f"pre_{i}/loss": vloss,
-                        f"pre_{i}/acc": acc,
-                    },
-                    step=epoch * self.pre_epochs + pre_epoch,
-                )
+            # # LOGGING
+            # if pre_epoch % 19 == 0:
+            #     acc, vloss = self.validate(model)
+            #     mlflow.log_metrics(
+            #         {
+            #             f"pre_{i}/loss": vloss,
+            #             f"pre_{i}/acc": acc,
+            #         },
+            #         step=epoch * self.pre_epochs + pre_epoch,
+            #     )
 
             mlflow.log_metrics(
                 {
@@ -147,7 +161,7 @@ class Preconditioned(Trainer):
         return delta_w
 
     def optimal_combination(
-        self, model: torch.nn.Module, contribution: dict[str, Any]
+        self, model: GNN, contribution: dict[str, Any]
     ) -> tuple[dict[str, Any], float]:
         """
         Combines model weights with contribution in the most optimal way.
@@ -211,15 +225,21 @@ class Preconditioned(Trainer):
 
         valid_loss = 0
         for epoch in range(self.epochs):
+            grad = self.get_global_grad(epoch)
+            grad_norm = parameter_norm(grad)
+
             # LOGGING
             acc, vloss = self.validate(self.model)
             mlflow.log_metrics(
                 {
                     "before_pre/loss": vloss,
                     "before_pre/acc": acc,
+                    "grad/global_L2": grad_norm,
                 },
                 step=epoch,
             )
+
+            w0 = deepcopy(self.model.state_dict())
 
             # Preconditioning step
             if self.ASM:  # Additive Schwarz
@@ -235,6 +255,17 @@ class Preconditioned(Trainer):
                         epoch=epoch,
                     )
                     contributions.append(delta_w)
+
+                    contrib_norm = parameter_norm(delta_w)
+                    dot = parameter_dot(grad, delta_w)
+                    mlflow.log_metrics(
+                        {
+                            f"grad/p{i}_L2": contrib_norm,
+                            f"grad/p{i}_dot": dot,
+                            f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
+                        },
+                        step=epoch,
+                    )
 
                 # Contribution combination
                 if self.gamma_algo == GAMMA_ALGO.SGD:
@@ -257,7 +288,8 @@ class Preconditioned(Trainer):
                         )
                     self.model.load_state_dict(w_avg)
 
-                else:
+                # NOTE: combines contributions one at a time
+                else:  # Regular line search
                     w_avg = deepcopy(self.model.state_dict())
                     for i, delta_w in enumerate(contributions):
                         if self.gamma_algo == GAMMA_ALGO.NONE:
@@ -268,7 +300,6 @@ class Preconditioned(Trainer):
                                 delta_w,
                             )
                         else:
-                            # NOTE: combines contributions one at a time
                             w_new, gamma = self.optimal_combination(self.model, delta_w)
 
                             self.model.load_state_dict(w_new)
@@ -295,13 +326,35 @@ class Preconditioned(Trainer):
                     w_new, gamma = self.optimal_combination(self.model, delta_w)
 
                     self.model.load_state_dict(w_new)
+                    contrib_norm = parameter_norm(delta_w)
+                    dot = parameter_dot(grad, delta_w)
                     mlflow.log_metrics(
                         {
                             f"gamma/p{i}": gamma,
+                            f"grad/p{i}_L2": contrib_norm,
+                            f"grad/p{i}_dot": dot,
+                            f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
                         },
                         step=epoch,
                     )
                     # self.train(optimizer, epoch)  # TEST: 05-22 notes
+
+            diff = deepcopy(self.model.state_dict())
+            apply_to_models(
+                diff,
+                lambda a, b: a - b,
+                w0,
+            )
+            pre_norm = parameter_norm(diff)
+            dot = parameter_dot(grad, diff)
+            mlflow.log_metrics(
+                {
+                    "grad/pre_L2": pre_norm,
+                    "grad/pre_dot": dot,
+                    "grad/pre_CS": dot / (pre_norm * grad_norm),
+                },
+                step=epoch,
+            )
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -344,11 +397,10 @@ class Preconditioned(Trainer):
 
         return valid_loss
 
-    def get_global_grad(self, optimizer, epoch):
+    def get_global_grad(self, epoch):
         """Computes a global gradient"""
         self.model.train()
-
-        optimizer.zero_grad()
+        self.model.zero_grad()
         for data in tqdm(
             self.trainloader,
             desc=f"Gradient: {epoch:03}",
@@ -365,6 +417,10 @@ class Preconditioned(Trainer):
             loss = self.model.loss(out, y)
 
             loss.backward()
+
+        return {
+            name: deepcopy(param.grad) for name, param in self.model.named_parameters()
+        }
 
     def train(self, optimizer, epoch):
         """Global training step"""
