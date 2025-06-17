@@ -12,7 +12,7 @@ full_epochs: 1
 
 # Additive Schwarz flag (defaults to Multiplicative Schwarz)
 ASM: false
-ls_algo: none
+gamma_algo: none
 
 seed: 42
 epochs: 100

@@ -165,7 +165,7 @@ def main(cfg: DictConfig):
                     "batch": cfg.dev.batch,
                     "epochs": cfg.epochs,
                     "additive": cfg.ASM,
-                    "line search": cfg.ls_algo,
+                    "line search": cfg.gamma_algo,
                     "partitions": cfg.partitions,
                     **params,
                 }
@@ -182,7 +182,7 @@ def main(cfg: DictConfig):
                 num_parts=cfg.partitions,
                 ASM=cfg.ASM,
                 epochs=cfg.epochs,
-                ls_algo=GAMMA_ALGO(cfg.ls_algo),
+                gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
                 **params,
             )
             loss = trainer.run()

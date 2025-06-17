@@ -7,4 +7,4 @@ trainer: pre-accumulating
 partitions: 2
 
 ASM: true
-ls_algo: SGD
+gamma_algo: SGD

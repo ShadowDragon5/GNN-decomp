@@ -6,6 +6,7 @@ import mlflow
 import torch
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
+from torch.linalg import matrix_norm
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -41,24 +42,26 @@ class Preconditioned(Trainer):
         part_trainloader: DataLoader,
         num_parts: int,
         ASM: bool,
+        gamma_algo: GAMMA_ALGO,
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
-        gamma_algo: GAMMA_ALGO = GAMMA_ALGO.BACKTRACKING,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.pre_epochs = pre_epochs  # epochs over partitioned graph data
         self.full_epochs = full_epochs  # epochs over full graph data
-        self.num_parts = num_parts
         self.part_trainloader = part_trainloader
+        self.num_parts = num_parts
+        self.ASM = ASM
+        self.gamma_algo = gamma_algo
         self.pre_lr = pre_lr
         self.pre_wd = pre_wd
-        self.ASM = ASM
         self.batched = batched
-        self.gamma_algo = gamma_algo
 
-    def precondition(self, model: GNN, lr: float, i: int, epoch: int) -> dict[str, Any]:
+    def precondition(
+        self, model: GNN, lr: float, optim_state: dict, i: int, epoch: int
+    ) -> dict[str, Any]:
         """
         i: partition index
         epoch: global epoch for logging
@@ -70,6 +73,7 @@ class Preconditioned(Trainer):
         pre_optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, weight_decay=self.pre_wd
         )
+        pre_optimizer.load_state_dict(optim_state)
 
         pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             pre_optimizer,
@@ -114,6 +118,7 @@ class Preconditioned(Trainer):
             pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
+            # LOGGING
             if pre_epoch % 19 == 0:
                 acc, vloss = self.validate(model)
                 mlflow.log_metrics(
@@ -222,11 +227,12 @@ class Preconditioned(Trainer):
 
                 for i in range(self.num_parts):
                     delta_w = self.precondition(
-                        self.model,
+                        model=self.model,
                         # self.pre_lr,
-                        scheduler.get_last_lr()[0],  # pass down the lr
-                        i,
-                        epoch,
+                        lr=scheduler.get_last_lr()[0],  # pass down the lr
+                        optim_state=optimizer.state_dict(),
+                        i=i,
+                        epoch=epoch,
                     )
                     contributions.append(delta_w)
 
@@ -279,11 +285,12 @@ class Preconditioned(Trainer):
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
                     delta_w = self.precondition(
-                        self.model,
+                        model=self.model,
                         # self.pre_lr,
-                        scheduler.get_last_lr()[0],  # pass down the lr
-                        i,
-                        epoch,
+                        lr=scheduler.get_last_lr()[0],  # pass down the lr
+                        optim_state=optimizer.state_dict(),
+                        i=i,
+                        epoch=epoch,
                     )
                     w_new, gamma = self.optimal_combination(self.model, delta_w)
 
@@ -337,10 +344,34 @@ class Preconditioned(Trainer):
 
         return valid_loss
 
+    def get_global_grad(self, optimizer, epoch):
+        """Computes a global gradient"""
+        self.model.train()
+
+        optimizer.zero_grad()
+        for data in tqdm(
+            self.trainloader,
+            desc=f"Gradient: {epoch:03}",
+            dynamic_ncols=True,
+            disable=self.quiet,
+        ):
+            x = data.x.to(self.device)
+            y = data.y.to(self.device)
+
+            edge_index = data.edge_index.to(self.device)
+            batch = data.batch.to(self.device)
+
+            out = self.model(x, edge_index, batch)
+            loss = self.model.loss(out, y)
+
+            loss.backward()
+
     def train(self, optimizer, epoch):
         """Global training step"""
         train_loss = 0
         self.model.train()
+
+        optimizer.zero_grad()
         for data in tqdm(
             self.trainloader,
             desc=f"Epoch: {epoch:03}",
@@ -368,7 +399,6 @@ class Preconditioned(Trainer):
 
         if not self.batched:
             optimizer.step()
-            optimizer.zero_grad()
 
         train_loss /= len(self.trainloader)
         return train_loss
