@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Callable, Type
 
 import hydra
+import matplotlib.pyplot as plt
 import mlflow
+import networkx as nx
 import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
@@ -129,6 +131,45 @@ def main(cfg: DictConfig):
             pin_memory=True,
             num_workers=cfg.dev.num_workers,
         )
+
+        # Partitioned graph plotting
+        if False:
+            for d, data in enumerate(part_trainloader):
+                plt.figure()
+
+                for i in range(cfg.partitions):
+                    x = data.get_x(i, device)
+                    edge_index = data.get_edge_index(i, device)
+
+                    N = x.shape[0]
+                    A = torch.zeros((N, N), dtype=torch.float)  # adjacency matrix
+
+                    # bidirectional adjacency matrix
+                    A[edge_index[0], edge_index[1]] = 1
+                    A[edge_index[1], edge_index[0]] = 1
+
+                    G = nx.from_numpy_array(A.numpy())
+                    pos = {
+                        node: (x[node, -2].item(), x[node, -1].item())
+                        for node in range(N)
+                    }
+
+                    rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
+
+                    nx.draw(
+                        G,
+                        pos,
+                        node_size=50,
+                        node_color=rgb,
+                        edge_color="gray",
+                        with_labels=False,
+                    )
+
+                plt.savefig(f"graphs/graph{d}.png", dpi=300)
+
+                if d == 5:
+                    break
+            return
 
     # learning rates and weight decays
     # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]

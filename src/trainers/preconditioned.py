@@ -107,7 +107,7 @@ class Preconditioned(Trainer):
                 disable=self.quiet,
             ):
                 data: PartitionedData = data
-                x = data.get_x(i, self.device).to(self.device)
+                x = data.get_x(i, self.device)
                 edge_index = data.get_edge_index(i, self.device)
                 batch = data.get_batch(i, self.device)
                 y = data.get_y(i, self.device)
