@@ -35,30 +35,42 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
 }
 
 
-def load_data(dataset: str, preprocessing, reload: bool, root: str):
-    trainset = GNNBenchmarkDataset(
-        root=root,
-        name=dataset,
-        split="train",
-        pre_transform=preprocessing,
-        force_reload=reload,
-    )
+def load_data(name: str, reload: bool, root: Path):
+    """
+    name: The name of the dataset
+        (one of `"PATTERN"`, `"MNIST"`, `"CIFAR10"`)
+    """
 
-    validset = GNNBenchmarkDataset(
-        root=root,
-        name=dataset,
-        split="val",
-        pre_transform=preprocessing,
-        force_reload=reload,
-    )
+    if name in ["CIFAR10", "MNIST", "PATTERN"]:
+        preprocessing = position_transform if name in ["CIFAR10", "MNIST"] else None
 
-    testset = GNNBenchmarkDataset(
-        root=root,
-        name=dataset,
-        split="test",
-        pre_transform=preprocessing,
-        force_reload=reload,
-    )
+        root_str = str(root)
+        trainset = GNNBenchmarkDataset(
+            root=root_str,
+            name=name,
+            split="train",
+            pre_transform=preprocessing,
+            force_reload=reload,
+        )
+
+        validset = GNNBenchmarkDataset(
+            root=root_str,
+            name=name,
+            split="val",
+            pre_transform=preprocessing,
+            force_reload=reload,
+        )
+
+        testset = GNNBenchmarkDataset(
+            root=root_str,
+            name=name,
+            split="test",
+            pre_transform=preprocessing,
+            force_reload=reload,
+        )
+
+    else:
+        raise Exception(f"Unkown dataset {name}")
 
     return trainset, validset, testset
 
@@ -83,9 +95,8 @@ def main(cfg: DictConfig):
 
     trainset, validset, testset = load_data(
         cfg.dataset,
-        None if cfg.dataset == "PATTERN" else position_transform,
         reload=cfg.u,
-        root=str(dataset_dir),
+        root=dataset_dir,
     )
     trainloader = DataLoader(
         trainset,
