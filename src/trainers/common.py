@@ -40,18 +40,20 @@ class Trainer(ABC):
         """Main training loop"""
         pass
 
-    def validate(self, model) -> tuple[float, float]:
+    def validate(self, model, dataloader=None) -> tuple[float, float]:
         """
-        Validates the model
+        Validates the model w.r.t. given dataloader (uses validation set by default)
         returns: (accuracy, loss)
         """
+        if dataloader is None:
+            dataloader = self.validloader
         valid_loss = 0
         correct = 0
         total = 0
         model.eval()
         with torch.no_grad():
             for data in tqdm(
-                self.validloader,
+                dataloader,
                 desc="Validation",
                 dynamic_ncols=True,
                 leave=False,

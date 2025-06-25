@@ -190,10 +190,10 @@ def main(cfg: DictConfig):
         "wd": cfg.model.wd,  # if cfg.model.wd != True else hp.choice("wd", LRnWDs),
         **(
             {
-                # "pre_epochs": cfg.pre_epochs,
-                # "full_epochs": cfg.full_epochs,
-                "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
-                "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
+                "pre_epochs": cfg.pre_epochs,
+                "full_epochs": cfg.full_epochs,
+                # "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
+                # "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
                 # if cfg.pre_epochs != True
                 # else 5 * hp.uniformint("pre_epochs", 1, 8),
                 "pre_lr": cfg.model.pre_lr,
@@ -227,7 +227,10 @@ def main(cfg: DictConfig):
             dropout=cfg.model.dropout,
         )
 
-        with mlflow.start_run(run_name=name, nested=True):
+        with mlflow.start_run(
+            run_name=f"{cfg.dataset}_{name}",
+            description="gamma optimization w.r.t. training set",
+        ):
             mlflow.log_params(
                 {
                     "seed": cfg.seed,
@@ -264,19 +267,15 @@ def main(cfg: DictConfig):
 
     # TODO: add hardware metrics
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
-    with mlflow.start_run(run_name=f"{cfg.dataset}_{name}"):
-        trials = Trials()
-        fmin(
-            fn=objective,
-            space=search_space,
-            algo=tpe.suggest,
-            max_evals=cfg.max_evals,
-            trials=trials,
-            show_progressbar=False,
-        )
-
-        # if best is not None:
-        #     mlflow.log_params(best)
+    trials = Trials()
+    fmin(
+        fn=objective,
+        space=search_space,
+        algo=tpe.suggest,
+        max_evals=cfg.max_evals,
+        trials=trials,
+        show_progressbar=False,
+    )
 
 
 if __name__ == "__main__":

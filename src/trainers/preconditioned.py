@@ -72,8 +72,17 @@ class Preconditioned(Trainer):
         self.pre_wd = pre_wd
         self.batched = batched
 
+        self.targetloader = self.trainloader
+        # self.targetloader = self.validloader
+
     def precondition(
-        self, model: GNN, lr: float, optim_state: dict, i: int, epoch: int
+        self,
+        model: GNN,
+        lr: float,
+        optim_state: dict,
+        i: int,
+        epoch: int,
+        grad: dict[str, torch.Tensor],
     ) -> dict[str, Any]:
         """
         i: partition index
@@ -132,7 +141,6 @@ class Preconditioned(Trainer):
             pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
-            # # LOGGING
             # if pre_epoch % 19 == 0:
             #     acc, vloss = self.validate(model)
             #     mlflow.log_metrics(
@@ -143,13 +151,31 @@ class Preconditioned(Trainer):
             #         step=epoch * self.pre_epochs + pre_epoch,
             #     )
 
+            delta_w = deepcopy(model.state_dict())
+            apply_to_models(
+                delta_w,
+                lambda a, b: a - b,
+                weights_0,
+            )
+            dot = parameter_dot(grad, delta_w)
             mlflow.log_metrics(
                 {
                     f"pre_train/loss_p{i}": pre_train_loss,
                     f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
+                    f"pre_{i}/dot": dot,
                 },
                 step=epoch * self.pre_epochs + pre_epoch,
+                # step=epoch * (self.pre_epochs + 1) + pre_epoch,
             )
+
+        # mlflow.log_metrics(
+        #     {
+        #         f"pre_train/loss_p{i}": np.nan,
+        #         f"pre_train/lr_p{i}": np.nan,
+        #         f"pre_{i}/dot": np.nan,
+        #     },
+        #     step=epoch * (self.pre_epochs + 1) + self.pre_epochs,
+        # )
 
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
@@ -179,7 +205,7 @@ class Preconditioned(Trainer):
                 contribution,
             )
             model.load_state_dict(w_new)
-            _, loss = self.validate(model)
+            _, loss = self.validate(model, self.targetloader)
             return loss
 
         gamma = 1.0
@@ -196,7 +222,7 @@ class Preconditioned(Trainer):
 
         elif self.gamma_algo == GAMMA_ALGO.BACKTRACKING:
             beta = 0.5
-            _, fx = self.validate(model)
+            _, fx = self.validate(model, self.targetloader)
             for _ in range(10):
                 if objective(gamma) < fx:
                     break
@@ -224,9 +250,12 @@ class Preconditioned(Trainer):
         self.model.to(self.device)
 
         valid_loss = 0
+        scaled_epochs = 0
         for epoch in range(self.epochs):
-            grad = self.get_global_grad(epoch)
-            grad_norm = parameter_norm(grad)
+            grad_train = self.get_global_grad(epoch, self.trainloader)
+            grad_norm = parameter_norm(grad_train)
+            grad_valid = self.get_global_grad(epoch, self.validloader)
+            dot = parameter_dot(grad_train, grad_valid)
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -235,6 +264,7 @@ class Preconditioned(Trainer):
                     "before_pre/loss": vloss,
                     "before_pre/acc": acc,
                     "grad/global_L2": grad_norm,
+                    "grad/train dot valid": dot,
                 },
                 step=epoch,
             )
@@ -253,16 +283,17 @@ class Preconditioned(Trainer):
                         optim_state=optimizer.state_dict(),
                         i=i,
                         epoch=epoch,
+                        grad=grad_train,
                     )
                     contributions.append(delta_w)
 
                     contrib_norm = parameter_norm(delta_w)
-                    dot = parameter_dot(grad, delta_w)
+                    dot = parameter_dot(grad_train, delta_w)
                     mlflow.log_metrics(
                         {
                             f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
-                            f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
+                            # f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
                         },
                         step=epoch,
                     )
@@ -315,6 +346,9 @@ class Preconditioned(Trainer):
 
             else:  # Multiplicative Schwarz
                 for i in range(self.num_parts):
+                    if i != 0:
+                        grad_train = self.get_global_grad(epoch, self.trainloader)
+                        grad_norm = parameter_norm(grad_train)
                     delta_w = self.precondition(
                         model=self.model,
                         # self.pre_lr,
@@ -322,23 +356,25 @@ class Preconditioned(Trainer):
                         optim_state=optimizer.state_dict(),
                         i=i,
                         epoch=epoch,
+                        grad=grad_train,
                     )
                     w_new, gamma = self.optimal_combination(self.model, delta_w)
 
                     self.model.load_state_dict(w_new)
                     contrib_norm = parameter_norm(delta_w)
-                    dot = parameter_dot(grad, delta_w)
+                    dot = parameter_dot(grad_train, delta_w)
                     mlflow.log_metrics(
                         {
                             f"gamma/p{i}": gamma,
                             f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
-                            f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
+                            # f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
                         },
                         step=epoch,
                     )
                     # self.train(optimizer, epoch)  # TEST: 05-22 notes
 
+            scaled_epochs += self.pre_epochs
             diff = deepcopy(self.model.state_dict())
             apply_to_models(
                 diff,
@@ -346,12 +382,12 @@ class Preconditioned(Trainer):
                 w0,
             )
             pre_norm = parameter_norm(diff)
-            dot = parameter_dot(grad, diff)
+            dot = parameter_dot(grad_train, diff)
             mlflow.log_metrics(
                 {
                     "grad/pre_L2": pre_norm,
                     "grad/pre_dot": dot,
-                    "grad/pre_CS": dot / (pre_norm * grad_norm),
+                    # "grad/pre_CS": dot / (pre_norm * grad_norm),
                 },
                 step=epoch,
             )
@@ -370,6 +406,13 @@ class Preconditioned(Trainer):
             train_loss = 0
             for _ in range(self.full_epochs):
                 train_loss = self.train(optimizer, epoch)
+                mlflow.log_metrics(
+                    {
+                        "train/scaled_loss": train_loss,
+                    },
+                    step=scaled_epochs,
+                )
+                scaled_epochs += 1
 
             # Validation
             accuracy, valid_loss = self.validate(self.model)
@@ -389,6 +432,14 @@ class Preconditioned(Trainer):
                 step=epoch,
             )
 
+            mlflow.log_metrics(
+                {
+                    "validate/scaled_loss": valid_loss,
+                    "validate/scaled_accuracy": accuracy,
+                },
+                step=scaled_epochs - 1,
+            )
+
         accuracy = self.test()
         if not self.quiet:
             print(f"Accuracy: {accuracy}")
@@ -397,14 +448,15 @@ class Preconditioned(Trainer):
 
         return valid_loss
 
-    def get_global_grad(self, epoch):
+    def get_global_grad(self, epoch, dataloader) -> dict[str, torch.Tensor]:
         """Computes a global gradient"""
         self.model.train()
         self.model.zero_grad()
         for data in tqdm(
-            self.trainloader,
+            dataloader,
             desc=f"Gradient: {epoch:03}",
             dynamic_ncols=True,
+            leave=False,
             disable=self.quiet,
         ):
             x = data.x.to(self.device)
@@ -419,7 +471,9 @@ class Preconditioned(Trainer):
             loss.backward()
 
         return {
-            name: deepcopy(param.grad) for name, param in self.model.named_parameters()
+            name: deepcopy(param.grad)
+            for name, param in self.model.named_parameters()
+            if param.grad is not None
         }
 
     def train(self, optimizer, epoch):
@@ -483,7 +537,7 @@ class Preconditioned(Trainer):
             total = 0
 
             for data in tqdm(
-                self.validloader,
+                self.targetloader,
                 desc=f"Eval {epoch}",
                 dynamic_ncols=True,
                 leave=False,
@@ -509,7 +563,7 @@ class Preconditioned(Trainer):
                     self.model, (theta, buffers), (x, edge_index, batch)
                 )
                 loss = self.model.loss(out, y)
-                valid_loss += loss.detach().item() / len(self.validloader)
+                valid_loss += loss.detach().item() / len(self.targetloader)
 
                 (grad,) = torch.autograd.grad(loss, gammas)
                 gammas.grad = grad.detach()
