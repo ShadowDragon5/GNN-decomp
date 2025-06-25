@@ -1,7 +1,10 @@
 defaults:
-  - pattern_base
+  - cifar10_base
   - _self_
 
-name: Pre
+name: P
 trainer: pre-accumulating
 partitions: 2
+
+ASM: true
+gamma_algo: SGD

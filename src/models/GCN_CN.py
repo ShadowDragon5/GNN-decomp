@@ -1,11 +1,16 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import Sequential, global_mean_pool
+from torch_geometric.nn import Sequential
 
-from .common import ResidualGCNLayer
+from .common import GNN, ResidualGCNLayer
 
 
-class GCN_CG(nn.Module):
+class GCN_CN(GNN):
+    """
+    Adapted from:
+    https://github.com/graphdeeplearning/benchmarking-gnns/blob/master/nets/SBMs_node_classification/gcn_net.py
+    """
+
     def __init__(
         self,
         in_dim: int,
@@ -15,6 +20,7 @@ class GCN_CG(nn.Module):
         dropout=0.0,
     ):
         super().__init__()
+        self.n_classes = n_classes
 
         self.embedding_h = nn.Linear(in_dim, hidden_dim)
 
@@ -36,32 +42,23 @@ class GCN_CG(nn.Module):
             nn.Linear(out_dim >> 2, n_classes),
         )
 
-    def forward(self, x, edge_index, batch):
+    def forward(self, x, edge_index, *_):
         h = self.embedding_h(x)
 
         h = self.conv(h, edge_index)
 
-        # per node features [n, f] -> graph features [n_batches, f]
-        h = global_mean_pool(h, batch)
-
         h = self.MLP_layer(h)
         return h
 
-    def loss(self, pred, label):
-        criterion = nn.CrossEntropyLoss()
+    def loss(self, pred, label) -> torch.Tensor:
+        # weighted cross entropy for unbalanced classes
+        V = label.size(0)
+        label_count = torch.bincount(label)
+        label_count = label_count[label_count.nonzero()].squeeze()
+        cluster_sizes = torch.zeros(self.n_classes).long().to(label.device)
+        cluster_sizes[torch.unique(label)] = label_count
+        weight = (V - cluster_sizes).float() / V
+        weight *= (cluster_sizes > 0).float()
+
+        criterion = nn.CrossEntropyLoss(weight=weight)
         return criterion(pred, label)
-
-
-if __name__ == "__main__":
-    model = GCN_CG(
-        hidden_dim=146,
-        out_dim=146,
-        in_dim=5,
-        n_classes=2,
-    )
-
-    d = model.state_dict()
-    for k, v in d.items():
-        print(v.data.dtype)
-        if v.data.dtype != torch.float:
-            print(k, v)

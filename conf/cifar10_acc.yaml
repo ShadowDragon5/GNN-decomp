@@ -1,0 +1,7 @@
+defaults:
+  - cifar10_base
+  - _self_
+
+name: P
+trainer: pre-accumulating
+partitions: 2

@@ -2,6 +2,6 @@ defaults:
   - pattern_base
   - _self_
 
-name: PreB
+name: PB
 trainer: pre-batched
 partitions: 2

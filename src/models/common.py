@@ -1,3 +1,6 @@
+from abc import ABC, abstractmethod
+
+import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv, Sequential
 
@@ -25,3 +28,9 @@ class ResidualGCNLayer(nn.Module):
 
         x = self.dropout(x)
         return x
+
+
+class GNN(nn.Module, ABC):
+    @abstractmethod
+    def loss(self, pred, label) -> torch.Tensor:
+        pass

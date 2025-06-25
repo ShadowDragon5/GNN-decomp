@@ -1,5 +1,6 @@
-# quiet
-q: false
+defaults:
+  - dev: local
+
 # force re-generate dataset files
 u: false
 # max evaluations for hyperopt search
@@ -7,8 +8,11 @@ max_evals: 1
 
 # preconditioner epochs (only for 'pre-' pipelines)
 pre_epochs: 40
+full_epochs: 1
+
 # Additive Schwarz flag (defaults to Multiplicative Schwarz)
 ASM: false
+gamma_algo: none
 
 seed: 42
 epochs: 100
