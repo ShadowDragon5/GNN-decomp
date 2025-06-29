@@ -168,15 +168,6 @@ class Preconditioned(Trainer):
                 # step=epoch * (self.pre_epochs + 1) + pre_epoch,
             )
 
-        # mlflow.log_metrics(
-        #     {
-        #         f"pre_train/loss_p{i}": np.nan,
-        #         f"pre_train/lr_p{i}": np.nan,
-        #         f"pre_{i}/dot": np.nan,
-        #     },
-        #     step=epoch * (self.pre_epochs + 1) + self.pre_epochs,
-        # )
-
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
         apply_to_models(
@@ -348,7 +339,7 @@ class Preconditioned(Trainer):
                 for i in range(self.num_parts):
                     if i != 0:
                         grad_train = self.get_global_grad(epoch, self.trainloader)
-                        grad_norm = parameter_norm(grad_train)
+
                     delta_w = self.precondition(
                         model=self.model,
                         # self.pre_lr,
@@ -439,6 +430,9 @@ class Preconditioned(Trainer):
                 },
                 step=scaled_epochs - 1,
             )
+
+            if epoch % 10 == 9:
+                mlflow.pytorch.log_model(self.model, "model")
 
         accuracy = self.test()
         if not self.quiet:

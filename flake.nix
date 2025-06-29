@@ -39,7 +39,7 @@
             if ! [ -d "${venvDir}" ]; then
               ${pkgs.python3.interpreter} -m venv "${venvDir}"
               source "${venvDir}/bin/activate"
-              pip install -r requirements.txt
+              [ -f requirements.txt ] && pip install -r requirements.txt
             else
               source "${venvDir}/bin/activate"
             fi
