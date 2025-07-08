@@ -5,6 +5,7 @@ defaults:
 u: false
 # max evaluations for hyperopt search
 max_evals: 1
+description: ''
 
 # preconditioner epochs (only for 'pre-' pipelines)
 pre_epochs: 40

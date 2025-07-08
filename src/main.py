@@ -229,7 +229,7 @@ def main(cfg: DictConfig):
 
         with mlflow.start_run(
             run_name=f"{cfg.dataset}_{name}",
-            description="gamma optimization w.r.t. training set",
+            description=cfg.description,
         ):
             mlflow.log_params(
                 {
