@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Literal
 
 import torch
 from torch_geometric.loader import DataLoader
@@ -97,3 +98,40 @@ class Trainer(ABC):
                 total += y.size(0)
 
         return correct / total
+
+
+class EarlyStopping:
+    def __init__(
+        self,
+        patience: int = 5,
+        min_delta: float = 1e-6,
+        mode: Literal["min", "max"] = "min",
+    ):
+        self.mode = mode
+        self.min_delta = min_delta
+        self.patience = patience
+        self.best = None
+        self.num_bad_epochs = 0
+        self._init_is_better(mode, min_delta)
+
+    def step(self, metrics: float):
+        if self.best is None:
+            self.best = metrics
+            return False
+
+        if self.is_better(metrics, self.best):
+            self.num_bad_epochs = 0
+            self.best = metrics
+        else:
+            self.num_bad_epochs += 1
+
+        if self.num_bad_epochs >= self.patience:
+            return True
+
+        return False
+
+    def _init_is_better(self, mode: Literal["min", "max"], min_delta: float):
+        if mode == "min":
+            self.is_better = lambda a, best: a < best - min_delta
+        elif mode == "max":
+            self.is_better = lambda a, best: a > best + min_delta
