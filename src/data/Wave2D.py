@@ -75,7 +75,11 @@ class wave_data_2D_irrgular(Dataset):
         return self.num_timesteps_pertraj * self.num_trajectory
 
     def get(self, idx):
-        trajnum = int(np.floor(idx / self.num_timesteps_pertraj))
+        # HACK:
+        trajnum = min(
+            int(np.floor(idx / self.num_timesteps_pertraj)),
+            len(self.trajectory_dataset) - 1,
+        )
         traj = self.trajectory_dataset[trajnum]
         U_solution = torch.tensor(
             traj["solution_low"][0 : self.endtime : self.step_size]
