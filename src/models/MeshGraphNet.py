@@ -133,12 +133,11 @@ class MeshGraphNet(GNN):
 
     def loss(self, pred, label) -> torch.Tensor:
         """MSE"""
-        if label.var != 0:
-            gnn_prdiction = pred.eval[:, :]
-            gt = pred.v_gt[:, :].to(self.device) - pred.noise[:, 0]
-        else:
-            gnn_prdiction = pred.eval[:, :]
-            gt = pred.v_gt[:, :].to(self.device)
+        gnn_prdiction = pred.eval[:, :]
+        gt = pred.v_gt[:, :].to(self.device) - pred.noise[:, 0]
+        # else:
+        #     gnn_prdiction = pred.eval[:, :]
+        #     gt = pred.v_gt[:, :].to(self.device)
         return ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()
 
 
