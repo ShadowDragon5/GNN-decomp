@@ -1,5 +1,6 @@
 # Rosa [05,06]
 data_dir: ./datasets
-batch: 10000
+# batch: 10000
+batch: 128
 q: true
-num_workers: 20
+num_workers: 2

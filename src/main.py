@@ -12,19 +12,26 @@ import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from omegaconf import DictConfig
-
-# from torch.profiler import ProfilerActivity, profile, tensorboard_trace_handler
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
-from models import GCN_CG, GCN_CN
-from trainers import GAMMA_ALGO, Accumulating, Batched, Preconditioned, Trainer
+from data import wave_data_2D_irrgular
+from models import GCN_CG, GCN_CN, MeshGraphNet
+from trainers import (
+    GAMMA_ALGO,
+    Accumulating,
+    Batched,
+    MGN_trainer,
+    Preconditioned,
+    Trainer,
+)
 from utils import partition_transform_global, position_transform
 
 MODELS = {
     "GCN_CG": GCN_CG,
     "GCN_CN": GCN_CN,
     # "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
+    "MeshGraphNet": MeshGraphNet,
 }
 
 TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
@@ -32,6 +39,7 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "accumulating": Accumulating,  # baseline with gradient accumulation
     "pre-accumulating": Preconditioned,
     "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
+    "mgn-batched": MGN_trainer,  # MGN baseline
 }
 
 
@@ -68,6 +76,31 @@ def load_data(name: str, reload: bool, root: Path):
             pre_transform=preprocessing,
             force_reload=reload,
         )
+
+    elif name == "Wave2D":
+        trainset = wave_data_2D_irrgular(
+            edge_features=["dist", "direction"],
+            endtime=250,
+            file="./datasets/PDE/training",
+            node_features=["u", "v", "density", "type"],
+            num_trajectory=1000,
+            step_size=5,
+            train=True,
+            var=0,
+        )
+
+        validset = wave_data_2D_irrgular(
+            edge_features=["dist", "direction"],
+            endtime=250,
+            file="./datasets/PDE/training",
+            node_features=["u", "v", "density", "type"],
+            num_trajectory=1000,
+            step_size=5,
+            train=False,
+            var=0,
+        )
+
+        testset = validset
 
     else:
         raise Exception(f"Unkown dataset {name}")
@@ -220,16 +253,19 @@ def main(cfg: DictConfig):
 
     def objective(params):
         model = MODELS[cfg.model.base](
-            in_dim=trainset.num_features,
+            in_dim=trainset.num_features,  # node_dim
             hidden_dim=cfg.model.hidden_dim,
             out_dim=cfg.model.out_dim,
-            n_classes=trainset.num_classes,
+            edge_dim=3,
+            num_steps=10,
+            device=device,
             dropout=cfg.model.dropout,
+            # n_classes=trainset.num_classes,
         )
 
         with mlflow.start_run(
             run_name=f"{cfg.dataset}_{name}",
-            description="gamma optimization w.r.t. training set",
+            description=cfg.description,
         ):
             mlflow.log_params(
                 {
@@ -280,6 +316,7 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     try:
+        # from torch.profiler import ProfilerActivity, profile, tensorboard_trace_handler
         # with profile(
         #     activities=[ProfilerActivity.CPU],
         #     on_trace_ready=tensorboard_trace_handler("./log"),

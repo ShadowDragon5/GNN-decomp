@@ -13,33 +13,30 @@ class GCN_CN(GNN):
 
     def __init__(
         self,
-        in_dim: int,
-        hidden_dim: int,
-        out_dim: int,
         n_classes: int,
-        dropout=0.0,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self.n_classes = n_classes
 
-        self.embedding_h = nn.Linear(in_dim, hidden_dim)
+        self.embedding_h = nn.Linear(self.in_dim, self.hidden_dim)
 
         self.conv = Sequential(
             "x, edge_index",
             [
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
             ],
         )
 
         self.MLP_layer = nn.Sequential(
-            nn.Linear(out_dim, out_dim >> 1),
+            nn.Linear(self.out_dim, self.out_dim >> 1),
             nn.ReLU(),
-            nn.Linear(out_dim >> 1, out_dim >> 2),
+            nn.Linear(self.out_dim >> 1, self.out_dim >> 2),
             nn.ReLU(),
-            nn.Linear(out_dim >> 2, n_classes),
+            nn.Linear(self.out_dim >> 2, n_classes),
         )
 
     def forward(self, x, edge_index, *_):
@@ -55,7 +52,7 @@ class GCN_CN(GNN):
         V = label.size(0)
         label_count = torch.bincount(label)
         label_count = label_count[label_count.nonzero()].squeeze()
-        cluster_sizes = torch.zeros(self.n_classes).long().to(label.device)
+        cluster_sizes = torch.zeros(self.n_classes).long().to(self.device)
         cluster_sizes[torch.unique(label)] = label_count
         weight = (V - cluster_sizes).float() / V
         weight *= (cluster_sizes > 0).float()

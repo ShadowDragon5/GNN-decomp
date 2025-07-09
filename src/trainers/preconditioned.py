@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 import mlflow
 import torch
+from numpy import ceil
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
 from torch.linalg import vector_norm
@@ -181,7 +182,7 @@ class Preconditioned(Trainer):
         self, model: GNN, contribution: dict[str, Any]
     ) -> tuple[dict[str, Any], float]:
         """
-        Combines model weights with contribution in the most optimal way.
+        Combines model weights with a contribution in the most optimal way.
         Uses line search algorithms to find the weight gamma with which the contribution will be added.
         """
         weights = deepcopy(model.state_dict())
@@ -218,6 +219,8 @@ class Preconditioned(Trainer):
                 if objective(gamma) < fx:
                     break
                 gamma *= beta
+            else:  # no valid gamma found, disable contribution
+                return weights, 0.0
 
         apply_to_models(
             weights,

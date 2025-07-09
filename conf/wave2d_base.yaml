@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+  - model: MeshGraphNet
+
+name: Wave2DBaseline
+dataset: Wave2D
+trainer: mgn-batched
+partitions: 1
+
+epochs: 5000
