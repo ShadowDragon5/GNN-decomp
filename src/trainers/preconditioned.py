@@ -365,7 +365,12 @@ class Preconditioned(Trainer):
                     )
                     # self.train(optimizer, epoch)  # TEST: 05-22 notes
 
-            scaled_epochs += self.pre_epochs
+            # in case of Additive Schwarz the parts can be ran in parallel
+            if self.ASM:
+                scaled_epochs += int(ceil(self.pre_epochs / self.num_parts))
+            else:
+                scaled_epochs += self.pre_epochs
+
             diff = deepcopy(self.model.state_dict())
             apply_to_models(
                 diff,
