@@ -41,6 +41,7 @@ class Trainer(ABC):
         """Main training loop"""
         pass
 
+    # TODO: change return to dict[str, float] for more dynamic measurement
     def validate(self, model, dataloader=None) -> tuple[float, float]:
         """
         Validates the model w.r.t. given dataloader (uses validation set by default)

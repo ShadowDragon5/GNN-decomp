@@ -1,4 +1,4 @@
-datasets/
+/datasets/
 saves/
 __pycache__/
 .venv/

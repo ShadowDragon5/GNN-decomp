@@ -7,7 +7,7 @@ from .common import Trainer
 
 class Batched(Trainer):
     """
-    State of the art re-implementation from (Dwivedi et al., 2022).
+    Re-implementation from (Dwivedi et al., 2022).
     Mini batches of full graphs.
     """
 
@@ -58,7 +58,7 @@ class Batched(Trainer):
             scheduler.step(valid_loss)
 
             if not self.quiet:
-                print(f"{self.name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+                print(f"{self.name} Epoch: {epoch:03} | Valid Loss: {valid_loss}")
 
             mlflow.log_metrics(
                 {

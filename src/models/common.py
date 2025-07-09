@@ -31,6 +31,23 @@ class ResidualGCNLayer(nn.Module):
 
 
 class GNN(nn.Module, ABC):
+    def __init__(
+        self,
+        in_dim: int,
+        hidden_dim: int,
+        out_dim: int,
+        dropout: float,
+        device,
+        **_,
+    ) -> None:
+        super().__init__()
+
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim  # TODO: rename
+        self.dropout = dropout
+        self.device = device
+
     @abstractmethod
     def loss(self, pred, label) -> torch.Tensor:
         pass

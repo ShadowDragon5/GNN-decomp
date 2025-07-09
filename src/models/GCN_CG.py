@@ -6,34 +6,27 @@ from .common import GNN, ResidualGCNLayer
 
 
 class GCN_CG(GNN):
-    def __init__(
-        self,
-        in_dim: int,
-        hidden_dim: int,
-        out_dim: int,
-        n_classes: int,
-        dropout=0.0,
-    ):
-        super().__init__()
+    def __init__(self, n_classes: int, **kwargs):
+        super().__init__(**kwargs)
 
-        self.embedding_h = nn.Linear(in_dim, hidden_dim)
+        self.embedding_h = nn.Linear(self.in_dim, self.hidden_dim)
 
         self.conv = Sequential(
             "x, edge_index",
             [
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
-                (ResidualGCNLayer(hidden_dim, dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
+                (ResidualGCNLayer(self.hidden_dim, self.dropout), "x, edge_index -> x"),
             ],
         )
 
         self.MLP_layer = nn.Sequential(
-            nn.Linear(out_dim, out_dim >> 1),
+            nn.Linear(self.out_dim, self.out_dim >> 1),
             nn.ReLU(),
-            nn.Linear(out_dim >> 1, out_dim >> 2),
+            nn.Linear(self.out_dim >> 1, self.out_dim >> 2),
             nn.ReLU(),
-            nn.Linear(out_dim >> 2, n_classes),
+            nn.Linear(self.out_dim >> 2, n_classes),
         )
 
     def forward(self, x, edge_index, batch):
