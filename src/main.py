@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from omegaconf import DictConfig
+from torch.utils.data import Subset
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
@@ -78,7 +79,7 @@ def load_data(name: str, reload: bool, root: Path):
         )
 
     elif name == "Wave2D":
-        trainset = wave_data_2D_irrgular(
+        dataset = wave_data_2D_irrgular(
             edge_features=["dist", "direction"],
             endtime=250,
             file="./datasets/PDE/training",
@@ -88,19 +89,26 @@ def load_data(name: str, reload: bool, root: Path):
             train=True,
             var=0,
         )
+        n = len(dataset)
+        indices = np.random.permutation(n)
+        train_end = int(0.7 * n)
+        val_end = train_end + int(0.15 * n)
 
-        validset = wave_data_2D_irrgular(
-            edge_features=["dist", "direction"],
-            endtime=250,
-            file="./datasets/PDE/training",
-            node_features=["u", "v", "density", "type"],
-            num_trajectory=1000,
-            step_size=5,
-            train=False,
-            var=0,
-        )
+        trainset = Subset(dataset, indices[:train_end])  # type: ignore
+        validset = Subset(dataset, indices[train_end:val_end])  # type: ignore
+        testset = Subset(dataset, indices[val_end:])  # type: ignore
 
-        testset = validset
+        # FIXME:
+        # validset = wave_data_2D_irrgular(
+        #     edge_features=["dist", "direction"],
+        #     endtime=250,
+        #     file="./datasets/PDE/training",
+        #     node_features=["u", "v", "density", "type"],
+        #     num_trajectory=1000,
+        #     step_size=5,
+        #     train=False,
+        #     var=0,
+        # )
 
     else:
         raise Exception(f"Unkown dataset {name}")
@@ -132,21 +140,21 @@ def main(cfg: DictConfig):
         root=dataset_dir,
     )
     trainloader = DataLoader(
-        trainset,
+        trainset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=True,
         pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     validloader = DataLoader(
-        validset,
+        validset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
         pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     testloader = DataLoader(
-        testset,
+        testset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
         pin_memory=True,
@@ -253,14 +261,16 @@ def main(cfg: DictConfig):
 
     def objective(params):
         model = MODELS[cfg.model.base](
-            in_dim=trainset.num_features,  # node_dim
+            in_dim=trainset.dataset.num_features
+            if trainset.dataset is not None
+            else trainset.num_features,  # node_dim
             hidden_dim=cfg.model.hidden_dim,
             out_dim=cfg.model.out_dim,
             edge_dim=3,
             num_steps=10,
             device=device,
             dropout=cfg.model.dropout,
-            # n_classes=trainset.num_classes,
+            # n_classes=trainset.num_classes,  # for CIFAR10 or MNIST
         )
 
         with mlflow.start_run(
