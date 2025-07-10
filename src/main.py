@@ -164,6 +164,16 @@ def main(cfg: DictConfig):
     part_trainloader = None
     has_pre = cfg.partitions > 1
     if has_pre:
+        # partset = GNNBenchmarkDataset(
+        #     root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
+        #     name=cfg.dataset,
+        #     split="train",
+        #     pre_transform=lambda data: partition_transform_global(
+        #         data if cfg.dataset == "PATTERN" else position_transform(data),
+        #         cfg.partitions,
+        #     ),
+        #     force_reload=cfg.u,
+        # )
         partset = GNNBenchmarkDataset(
             root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
             name=cfg.dataset,
@@ -217,7 +227,7 @@ def main(cfg: DictConfig):
                         with_labels=False,
                     )
 
-                plt.savefig(f"graphs/graph{d}.png", dpi=300)
+                plt.savefig(f"graphs/PDE/graph{d}.png", dpi=300)
 
                 if d == 5:
                     break
@@ -260,6 +270,7 @@ def main(cfg: DictConfig):
     name += f"P{cfg.partitions}_S{cfg.seed}_{cfg.trainer}"
 
     def objective(params):
+        # HACK:
         model = MODELS[cfg.model.base](
             in_dim=trainset.dataset.num_features
             if trainset.dataset is not None

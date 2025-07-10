@@ -66,5 +66,15 @@ def partition_transform_global(data: Data, num_parts: int = 2):
         subgraphs[f"x_{i}"] = G.x
         subgraphs[f"y_{i}"] = G.y
         subgraphs[f"edge_index_{i}"] = G.edge_index
+        subgraphs[f"edge_attr_{i}"] = G.edge_attr
+        subgraphs[f"current_u_{i}"] = G.current_u
+        subgraphs[f"h_{i}"] = G.h
+        subgraphs[f"gt_{i}"] = G.gt
+        subgraphs[f"v_gt_{i}"] = G.v_gt
+        subgraphs[f"x_eval_{i}"] = G.x_eval
+        subgraphs[f"coords_{i}"] = G.coords
+        subgraphs[f"unroll_v_gt_{i}"] = G.unroll_v_gt
+        subgraphs[f"unroll_u_gt_{i}"] = G.unroll_u_gt
+        subgraphs[f"a_gt_{i}"] = G.a_gt
 
     return PartitionedData(batch=data.batch, **subgraphs)
