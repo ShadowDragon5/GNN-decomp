@@ -1,0 +1,15 @@
+artifact_uri: file:///users/lvarnas/GNN-decomp/mlruns/663342273945543318/5a44e97fbd8e40179b31386a822988be/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '663342273945543318'
+lifecycle_stage: active
+run_id: 5a44e97fbd8e40179b31386a822988be
+run_name: P_MS_P2_S42_pre-accumulating
+run_uuid: 5a44e97fbd8e40179b31386a822988be
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747893112569
+status: 1
+tags: []
+user_id: lvarnas

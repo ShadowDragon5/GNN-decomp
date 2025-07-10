@@ -1,0 +1,16 @@
+artifact_uri: file:///users/lvarnas/GNN-decomp/mlruns/111111111111111111/95479b8ccfb44a968b037d04be75cab7/artifacts
+deleted_time: 1747304482849
+end_time: 1747299474302
+entry_point_name: ''
+experiment_id: '111111111111111111'
+lifecycle_stage: deleted
+run_id: 95479b8ccfb44a968b037d04be75cab7
+run_name: Baseline_P1_S42_batched
+run_uuid: 95479b8ccfb44a968b037d04be75cab7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747299219314
+status: 3
+tags: []
+user_id: lvarnas

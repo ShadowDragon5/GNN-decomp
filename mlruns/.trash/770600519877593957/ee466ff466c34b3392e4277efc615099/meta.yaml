@@ -1,0 +1,16 @@
+artifact_uri: file:///home/laurynas/Documents/MT/GNN-decomp/mlruns/770600519877593957/ee466ff466c34b3392e4277efc615099/artifacts
+deleted_time: 1750087134877
+end_time: 1750086365785
+entry_point_name: ''
+experiment_id: '770600519877593957'
+lifecycle_stage: deleted
+run_id: ee466ff466c34b3392e4277efc615099
+run_name: P_MS_P2_S42_pre-accumulating
+run_uuid: ee466ff466c34b3392e4277efc615099
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1750086289071
+status: 4
+tags: []
+user_id: laurynas

@@ -1,0 +1,16 @@
+artifact_uri: file:///home/varnal/GNN-decomp/mlruns/656278128290953411/917df3971416438492823674402cc89b/artifacts
+deleted_time: 1752145744132
+end_time: 1752102573224
+entry_point_name: ''
+experiment_id: '656278128290953411'
+lifecycle_stage: deleted
+run_id: 917df3971416438492823674402cc89b
+run_name: Wave2D_Wave2DBaseline_P1_S42_mgn-batched
+run_uuid: 917df3971416438492823674402cc89b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1752100178062
+status: 4
+tags: []
+user_id: varnal

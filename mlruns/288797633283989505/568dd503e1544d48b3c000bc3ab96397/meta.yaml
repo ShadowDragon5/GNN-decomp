@@ -1,0 +1,15 @@
+artifact_uri: file:///users/lvarnas/GNN-decomp/mlruns/288797633283989505/568dd503e1544d48b3c000bc3ab96397/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '288797633283989505'
+lifecycle_stage: active
+run_id: 568dd503e1544d48b3c000bc3ab96397
+run_name: CIFAR10_PB_MS_P2_S42_pre-batched
+run_uuid: 568dd503e1544d48b3c000bc3ab96397
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747304576875
+status: 1
+tags: []
+user_id: lvarnas

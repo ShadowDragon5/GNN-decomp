@@ -1,0 +1,16 @@
+artifact_uri: file:///users/lvarnas/GNN-decomp/mlruns/111111111111111111/175f27ad5e03464d87203e6487e009ec/artifacts
+deleted_time: 1747304482848
+end_time: 1747303289084
+entry_point_name: ''
+experiment_id: '111111111111111111'
+lifecycle_stage: deleted
+run_id: 175f27ad5e03464d87203e6487e009ec
+run_name: CIFAR10_Baseline_P1_S42_accumulating
+run_uuid: 175f27ad5e03464d87203e6487e009ec
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747300806795
+status: 3
+tags: []
+user_id: lvarnas

@@ -1,0 +1,15 @@
+artifact_uri: file:///home/varnal/GNN-decomp/mlruns/739847721773837803/b20f57e5690e438bbc1c7da9d5325631/artifacts
+end_time: 1750165094888
+entry_point_name: ''
+experiment_id: '739847721773837803'
+lifecycle_stage: active
+run_id: b20f57e5690e438bbc1c7da9d5325631
+run_name: CIFAR10_P_MS_P2_S42_pre-accumulating
+run_uuid: b20f57e5690e438bbc1c7da9d5325631
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1750089320410
+status: 3
+tags: []
+user_id: varnal

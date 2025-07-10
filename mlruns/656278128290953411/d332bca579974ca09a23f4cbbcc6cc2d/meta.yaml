@@ -1,0 +1,15 @@
+artifact_uri: file:///home/varnal/GNN-decomp/mlruns/656278128290953411/d332bca579974ca09a23f4cbbcc6cc2d/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '656278128290953411'
+lifecycle_stage: active
+run_id: d332bca579974ca09a23f4cbbcc6cc2d
+run_name: PB_AS_P2_3F
+run_uuid: d332bca579974ca09a23f4cbbcc6cc2d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751909284066
+status: 1
+tags: []
+user_id: varnal
