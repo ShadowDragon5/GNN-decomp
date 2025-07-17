@@ -1,7 +1,0 @@
-artifact_location: file:///users/lvarnas/GNN-decomp/mlruns/288797633283989505
-creation_time: 1747297799045
-experiment_id: '111111111111111111'
-last_update_time: 1749118580162
-lifecycle_stage: active
-name: CIFAR10 Baselines
-tags: {}
