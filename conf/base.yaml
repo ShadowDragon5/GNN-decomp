@@ -10,6 +10,7 @@ description: ''
 # preconditioner epochs (only for 'pre-' pipelines)
 pre_epochs: 40
 full_epochs: 1
+target: train
 
 # Additive Schwarz flag (defaults to Multiplicative Schwarz)
 ASM: false

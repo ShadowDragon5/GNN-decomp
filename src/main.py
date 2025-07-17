@@ -1,4 +1,3 @@
-import random
 from datetime import datetime
 from logging import warning
 from pathlib import Path
@@ -126,7 +125,6 @@ def main(cfg: DictConfig):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # setting seeds
-    random.seed(cfg.seed)
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
     if device.type == "cuda":
@@ -269,11 +267,11 @@ def main(cfg: DictConfig):
             name += "MS_"  # Multiplicative
     name += f"P{cfg.partitions}_S{cfg.seed}_{cfg.trainer}"
 
-    def objective(params):
+    def objective(trainer_params):
         # HACK:
         model = MODELS[cfg.model.base](
             in_dim=trainset.dataset.num_features
-            if trainset.dataset is not None
+            if cfg.dataset == "Wave2D"
             else trainset.num_features,  # node_dim
             hidden_dim=cfg.model.hidden_dim,
             out_dim=cfg.model.out_dim,
@@ -281,7 +279,9 @@ def main(cfg: DictConfig):
             num_steps=10,
             device=device,
             dropout=cfg.model.dropout,
-            # n_classes=trainset.num_classes,  # for CIFAR10 or MNIST
+            n_classes=trainset.num_classes  # for CIFAR10 or MNIST
+            if cfg.dataset != "Wave2D"
+            else None,
         )
 
         with mlflow.start_run(
@@ -299,7 +299,8 @@ def main(cfg: DictConfig):
                     "additive": cfg.ASM,
                     "line search": cfg.gamma_algo,
                     "partitions": cfg.partitions,
-                    **params,
+                    "optim target": cfg.target,
+                    **trainer_params,
                 }
             )
             trainer = TRAINERS[cfg.trainer](
@@ -315,7 +316,8 @@ def main(cfg: DictConfig):
                 ASM=cfg.ASM,
                 epochs=cfg.epochs,
                 gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
-                **params,
+                target=cfg.target,
+                **trainer_params,
             )
             loss = trainer.run()
 

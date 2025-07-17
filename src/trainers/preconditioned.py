@@ -60,6 +60,7 @@ class Preconditioned(Trainer):
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
+        target: str = "train",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -73,8 +74,10 @@ class Preconditioned(Trainer):
         self.pre_wd = pre_wd
         self.batched = batched
 
-        self.targetloader = self.trainloader
-        # self.targetloader = self.validloader
+        if target == "train":
+            self.targetloader = self.trainloader
+        else:
+            self.targetloader = self.validloader
 
     def precondition(
         self,
@@ -142,15 +145,15 @@ class Preconditioned(Trainer):
             pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
-            # if pre_epoch % 19 == 0:
-            #     acc, vloss = self.validate(model)
-            #     mlflow.log_metrics(
-            #         {
-            #             f"pre_{i}/loss": vloss,
-            #             f"pre_{i}/acc": acc,
-            #         },
-            #         step=epoch * self.pre_epochs + pre_epoch,
-            #     )
+            if pre_epoch % 19 == 0:
+                acc, vloss = self.validate(model)
+                mlflow.log_metrics(
+                    {
+                        f"pre_{i}/loss": vloss,
+                        f"pre_{i}/acc": acc,
+                    },
+                    step=epoch * self.pre_epochs + pre_epoch,
+                )
 
             delta_w = deepcopy(model.state_dict())
             apply_to_models(
@@ -248,8 +251,6 @@ class Preconditioned(Trainer):
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
             grad_norm = parameter_norm(grad_train)
-            grad_valid = self.get_global_grad(epoch, self.validloader)
-            dot = parameter_dot(grad_train, grad_valid)
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -258,7 +259,6 @@ class Preconditioned(Trainer):
                     "before_pre/loss": vloss,
                     "before_pre/acc": acc,
                     "grad/global_L2": grad_norm,
-                    "grad/train dot valid": dot,
                 },
                 step=epoch,
             )
@@ -287,7 +287,6 @@ class Preconditioned(Trainer):
                         {
                             f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
-                            # f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
                         },
                         step=epoch,
                     )
@@ -361,7 +360,6 @@ class Preconditioned(Trainer):
                             f"gamma/p{i}": gamma,
                             f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
-                            # f"grad/p{i}_CS": dot / (contrib_norm * grad_norm),
                         },
                         step=epoch,
                     )
@@ -385,7 +383,6 @@ class Preconditioned(Trainer):
                 {
                     "grad/pre_L2": pre_norm,
                     "grad/pre_dot": dot,
-                    # "grad/pre_CS": dot / (pre_norm * grad_norm),
                 },
                 step=epoch,
             )
@@ -589,6 +586,7 @@ class Preconditioned(Trainer):
                     "gamma_optim/loss": valid_loss,
                     "gamma_optim/accuracy": correct / total,
                 },
+                # BUG: early stopping causes gaps in the plot
                 step=epoch + N_EPOCHS * global_epoch,
             )
 
