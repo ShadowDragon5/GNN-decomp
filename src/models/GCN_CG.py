@@ -29,7 +29,7 @@ class GCN_CG(GNN):
             nn.Linear(self.out_dim >> 2, n_classes),
         )
 
-    def forward(self, x, edge_index, batch):
+    def forward(self, x, y, edge_index, batch, **_):
         h = self.embedding_h(x)
 
         h = self.conv(h, edge_index)
@@ -38,7 +38,7 @@ class GCN_CG(GNN):
         h = global_mean_pool(h, batch)
 
         h = self.MLP_layer(h)
-        return h
+        return h, y
 
     def loss(self, pred, label) -> torch.Tensor:
         criterion = nn.CrossEntropyLoss()

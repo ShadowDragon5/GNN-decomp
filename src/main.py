@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from omegaconf import DictConfig
-from torch.utils.data import Subset
+from torch_geometric.data import Dataset
 from torch_geometric.datasets import GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 
@@ -29,7 +29,7 @@ from utils import partition_transform_global, position_transform
 
 MODELS = {
     "GCN_CG": GCN_CG,
-    "GCN_CN": GCN_CN,
+    "GCN_CN": GCN_CN,  # Pattern
     # "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
     "MeshGraphNet": MeshGraphNet,
 }
@@ -43,10 +43,10 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
 }
 
 
-def load_data(name: str, reload: bool, root: Path):
+def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dataset]:
     """
     name: The name of the dataset
-        (one of `"PATTERN"`, `"MNIST"`, `"CIFAR10"`)
+        (one of `"PATTERN"`, `"MNIST"`, `"CIFAR10"`, `"Wave2D"`)
     """
 
     if name in ["CIFAR10", "MNIST", "PATTERN"]:
@@ -78,36 +78,32 @@ def load_data(name: str, reload: bool, root: Path):
         )
 
     elif name == "Wave2D":
-        dataset = wave_data_2D_irrgular(
+        root_str = str(root / "PDE/training")
+        trainset = wave_data_2D_irrgular(
             edge_features=["dist", "direction"],
             endtime=250,
-            file="./datasets/PDE/training",
+            root=root_str,
             node_features=["u", "v", "density", "type"],
             num_trajectory=1000,
             step_size=5,
             train=True,
             var=0,
+            force_reload=reload,
         )
-        n = len(dataset)
-        indices = np.random.permutation(n)
-        train_end = int(0.7 * n)
-        val_end = train_end + int(0.15 * n)
 
-        trainset = Subset(dataset, indices[:train_end])  # type: ignore
-        validset = Subset(dataset, indices[train_end:val_end])  # type: ignore
-        testset = Subset(dataset, indices[val_end:])  # type: ignore
+        validset = wave_data_2D_irrgular(
+            edge_features=["dist", "direction"],
+            endtime=250,
+            root=root_str,
+            node_features=["u", "v", "density", "type"],
+            num_trajectory=100,
+            step_size=5,
+            train=False,
+            var=0,
+            force_reload=reload,
+        )
 
-        # FIXME:
-        # validset = wave_data_2D_irrgular(
-        #     edge_features=["dist", "direction"],
-        #     endtime=250,
-        #     file="./datasets/PDE/training",
-        #     node_features=["u", "v", "density", "type"],
-        #     num_trajectory=1000,
-        #     step_size=5,
-        #     train=False,
-        #     var=0,
-        # )
+        testset = validset
 
     else:
         raise Exception(f"Unkown dataset {name}")
@@ -162,26 +158,35 @@ def main(cfg: DictConfig):
     part_trainloader = None
     has_pre = cfg.partitions > 1
     if has_pre:
-        # partset = GNNBenchmarkDataset(
-        #     root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
-        #     name=cfg.dataset,
-        #     split="train",
-        #     pre_transform=lambda data: partition_transform_global(
-        #         data if cfg.dataset == "PATTERN" else position_transform(data),
-        #         cfg.partitions,
-        #     ),
-        #     force_reload=cfg.u,
-        # )
-        partset = GNNBenchmarkDataset(
-            root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
-            name=cfg.dataset,
-            split="train",
-            pre_transform=lambda data: partition_transform_global(
-                data if cfg.dataset == "PATTERN" else position_transform(data),
-                cfg.partitions,
-            ),
-            force_reload=cfg.u,
-        )
+        partset = None
+        if cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"]:
+            partset = GNNBenchmarkDataset(
+                root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
+                name=cfg.dataset,
+                split="train",
+                pre_transform=lambda data: partition_transform_global(
+                    data if cfg.dataset == "PATTERN" else position_transform(data),
+                    cfg.partitions,
+                ),
+                force_reload=cfg.u,
+            )
+        elif cfg.dataset == "Wave2D":
+            partset = wave_data_2D_irrgular(
+                edge_features=["dist", "direction"],
+                endtime=250,
+                root=str(dataset_dir / f"PDE/partitioned_{cfg.partitions}"),
+                node_features=["u", "v", "density", "type"],
+                num_trajectory=1000,
+                step_size=5,
+                train=True,
+                var=0,
+                pre_transform=lambda data: partition_transform_global(
+                    data, cfg.partitions
+                ),
+                force_reload=cfg.u,
+            )
+        assert partset is not None
+
         part_trainloader = DataLoader(
             partset,
             batch_size=cfg.dev.batch,
@@ -210,17 +215,18 @@ def main(cfg: DictConfig):
 
                     G = nx.from_numpy_array(A.numpy())
                     pos = {
-                        node: (x[node, -2].item(), x[node, -1].item())
+                        # node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
+                        node: data.get("coords", i, device)[node]  # Wave2D
                         for node in range(N)
                     }
 
-                    rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
+                    # rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
 
                     nx.draw(
                         G,
                         pos,
                         node_size=50,
-                        node_color=rgb,
+                        # node_color=rgb,
                         edge_color="gray",
                         with_labels=False,
                     )
@@ -268,20 +274,19 @@ def main(cfg: DictConfig):
     name += f"P{cfg.partitions}_S{cfg.seed}_{cfg.trainer}"
 
     def objective(trainer_params):
-        # HACK:
+        n_classes = None
+        if cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"]:
+            n_classes = trainset.num_classes  # type: ignore
+
         model = MODELS[cfg.model.base](
-            in_dim=trainset.dataset.num_features
-            if cfg.dataset == "Wave2D"
-            else trainset.num_features,  # node_dim
+            in_dim=trainset.num_features,
             hidden_dim=cfg.model.hidden_dim,
             out_dim=cfg.model.out_dim,
             edge_dim=3,
             num_steps=10,
             device=device,
             dropout=cfg.model.dropout,
-            n_classes=trainset.num_classes  # for CIFAR10 or MNIST
-            if cfg.dataset != "Wave2D"
-            else None,
+            n_classes=n_classes,
         )
 
         with mlflow.start_run(

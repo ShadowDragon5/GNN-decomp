@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from models.common import GNN
-from utils import PartitionedData
+from utils import PartitionedData, get_data
 
 from .common import EarlyStopping, Trainer
 
@@ -120,12 +120,12 @@ class Preconditioned(Trainer):
                 disable=self.quiet,
             ):
                 data: PartitionedData = data
-                x = data.get_x(i, self.device)
-                edge_index = data.get_edge_index(i, self.device)
-                batch = data.get_batch(i, self.device)
-                y = data.get_y(i, self.device)
+                # x = data.get_x(i, self.device)
+                # edge_index = data.get_edge_index(i, self.device)
+                # batch = data.get_batch(i, self.device)
+                # y = data.get_y(i, self.device)
 
-                out = model(x, edge_index, batch)
+                out, y = model(**get_data(i, self.device))
                 loss = model.loss(out, y)
 
                 pre_train_loss += loss.detach().item()
@@ -150,7 +150,7 @@ class Preconditioned(Trainer):
                 mlflow.log_metrics(
                     {
                         f"pre_{i}/loss": vloss,
-                        f"pre_{i}/acc": acc,
+                        # f"pre_{i}/acc": acc,
                     },
                     step=epoch * self.pre_epochs + pre_epoch,
                 )
@@ -257,7 +257,7 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "before_pre/loss": vloss,
-                    "before_pre/acc": acc,
+                    # "before_pre/acc": acc,
                     "grad/global_L2": grad_norm,
                 },
                 step=epoch,
@@ -392,7 +392,7 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "after_pre/loss": vloss,
-                    "after_pre/acc": acc,
+                    # "after_pre/acc": acc,
                 },
                 step=epoch,
             )
@@ -422,7 +422,7 @@ class Preconditioned(Trainer):
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
-                    "validate/accuracy": accuracy,
+                    # "validate/accuracy": accuracy,
                 },
                 step=epoch,
             )
@@ -430,7 +430,7 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "validate/scaled_loss": valid_loss,
-                    "validate/scaled_accuracy": accuracy,
+                    # "validate/scaled_accuracy": accuracy,
                 },
                 step=scaled_epochs - 1,
             )
@@ -438,11 +438,11 @@ class Preconditioned(Trainer):
             if epoch % 10 == 9:
                 mlflow.pytorch.log_model(self.model, "model")
 
-        accuracy = self.test()
-        if not self.quiet:
-            print(f"Accuracy: {accuracy}")
-
-        mlflow.log_metric("test/accuracy", accuracy)
+        # accuracy = self.test()
+        # if not self.quiet:
+        #     print(f"Accuracy: {accuracy}")
+        #
+        # mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
 
@@ -457,13 +457,9 @@ class Preconditioned(Trainer):
             leave=False,
             disable=self.quiet,
         ):
-            x = data.x.to(self.device)
-            y = data.y.to(self.device)
+            data.to(self.device)
 
-            edge_index = data.edge_index.to(self.device)
-            batch = data.batch.to(self.device)
-
-            out = self.model(x, edge_index, batch)
+            out, y = self.model(**get_data(data))
             loss = self.model.loss(out, y)
 
             loss.backward()
@@ -486,13 +482,9 @@ class Preconditioned(Trainer):
             dynamic_ncols=True,
             disable=self.quiet,
         ):
-            x = data.x.to(self.device)
-            y = data.y.to(self.device)
+            data.to(self.device)
 
-            edge_index = data.edge_index.to(self.device)
-            batch = data.batch.to(self.device)
-
-            out = self.model(x, edge_index, batch)
+            out, y = self.model(**get_data(data))
             loss = self.model.loss(out, y)
 
             train_loss += loss.detach().item()
@@ -540,8 +532,8 @@ class Preconditioned(Trainer):
             gamma_optim.zero_grad()
 
             valid_loss = 0
-            correct = 0
-            total = 0
+            # correct = 0
+            # total = 0
 
             for data in tqdm(
                 self.targetloader,
@@ -550,12 +542,7 @@ class Preconditioned(Trainer):
                 leave=False,
                 disable=self.quiet,
             ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
-
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
+                data.to(self.device)
                 # Gamma.T * Theta
                 # rebuilding required for computational graph
                 theta = deepcopy(params)
@@ -566,8 +553,8 @@ class Preconditioned(Trainer):
                         delta_w,
                     )
 
-                out = functional_call(
-                    self.model, (theta, buffers), (x, edge_index, batch)
+                out, y = functional_call(
+                    self.model, (theta, buffers), kwargs=get_data(data)
                 )
                 loss = self.model.loss(out, y)
                 valid_loss += loss.detach().item() / len(self.targetloader)
@@ -576,15 +563,15 @@ class Preconditioned(Trainer):
                 gammas.grad = grad.detach()
                 gamma_optim.step()
 
-                # accuracy
-                pred = out.argmax(dim=1)  # Predicted labels
-                correct += (pred == y).sum().item()
-                total += y.size(0)
+                # # accuracy
+                # pred = out.argmax(dim=1)  # Predicted labels
+                # correct += (pred == y).sum().item()
+                # total += y.size(0)
 
             mlflow.log_metrics(
                 {
                     "gamma_optim/loss": valid_loss,
-                    "gamma_optim/accuracy": correct / total,
+                    # "gamma_optim/accuracy": correct / total,
                 },
                 # BUG: early stopping causes gaps in the plot
                 step=epoch + N_EPOCHS * global_epoch,

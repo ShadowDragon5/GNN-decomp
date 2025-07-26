@@ -1,0 +1,7 @@
+defaults:
+  - wave2d_base
+  - _self_
+
+name: Wave2DPre
+trainer: pre-accumulating
+partitions: 2

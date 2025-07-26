@@ -6,6 +6,7 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from models.common import GNN
+from utils import get_data
 
 
 class Trainer(ABC):
@@ -42,7 +43,7 @@ class Trainer(ABC):
         pass
 
     # TODO: change return to dict[str, float] for more dynamic measurement
-    def validate(self, model, dataloader=None) -> tuple[float, float]:
+    def validate(self, model, dataloader=None):
         """
         Validates the model w.r.t. given dataloader (uses validation set by default)
         returns: (accuracy, loss)
@@ -50,8 +51,8 @@ class Trainer(ABC):
         if dataloader is None:
             dataloader = self.validloader
         valid_loss = 0
-        correct = 0
-        total = 0
+        # correct = 0
+        # total = 0
         model.eval()
         with torch.no_grad():
             for data in tqdm(
@@ -61,23 +62,19 @@ class Trainer(ABC):
                 leave=False,
                 disable=self.quiet,
             ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
+                data.to(self.device)
 
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
-                out = model(x, edge_index, batch)
+                out, y = model(**get_data(data))
                 loss = model.loss(out, y)
                 valid_loss += loss.detach().item()
 
-                # Validation accuracy
-                pred = out.argmax(dim=1)  # Predicted labels
-                correct += (pred == y).sum().item()
-                total += y.size(0)
+                # # Validation accuracy
+                # pred = out.argmax(dim=1)  # Predicted labels
+                # correct += (pred == y).sum().item()
+                # total += y.size(0)
 
         valid_loss /= len(self.validloader)
-        return correct / total, valid_loss
+        return None, valid_loss
 
     def test(self) -> float:
         self.model.eval()
@@ -86,13 +83,10 @@ class Trainer(ABC):
         total = 0
         with torch.no_grad():
             for data in self.testloader:
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
+                data.to(self.device)
 
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
+                out, y = self.model(**get_data(data))
 
-                out = self.model(x, edge_index, batch)
                 pred = out.argmax(dim=1)  # Predicted labels
 
                 correct += (pred == y).sum().item()

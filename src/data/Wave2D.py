@@ -21,22 +21,22 @@ class wave_data_2D_irrgular(Dataset):
         num_trajectory=1,
         node_features=["u", "v", "density", "type"],
         edge_features=["dist", "direction"],
-        file=None,
+        root=None,
         train=True,
         endtime=-1,
         step_size=1,
         index=0,
         var=0,
+        **kwargs,
     ):
-        super(wave_data_2D_irrgular, self).__init__()
-        """ 
+        """
         Parameters
         ----------
         num_trajectory: number of trajectories
         node_features: input node features of GNN
         edge_features: input edge features of GNN
-        file: dataset file folder 
-        train: if training or validation 
+        root: dataset folder
+        train: if training or validation
         endtime: length for each trajectory
         step_size: gnn_stepsize = stepsize*class_solver_stepsize
         index: starting index for dataset
@@ -53,30 +53,53 @@ class wave_data_2D_irrgular(Dataset):
             graph.gt - ground truth field value
         """
 
+        self.train = train
+        self.index = index
         self.num_trajectory = num_trajectory
-        if train:
-            trajectory = np.load("{}/train.npy".format(file), allow_pickle=True)
-        else:
-            trajectory = np.load("{}/valid.npy".format(file), allow_pickle=True)
         self.endtime = endtime
         self.step_size = step_size
-        self.trajectory_dataset = trajectory[index : num_trajectory + index]
         self.node_features = node_features
         self.edge_features = edge_features
-        self.num_timesteps_pertraj = (
-            self.trajectory_dataset[0]["solution_low"][
+        self.var = var
+
+        super().__init__(root=root, **kwargs)
+
+        self.data_list = torch.load(self.processed_paths[0], weights_only=False)
+
+    def len(self):
+        return len(self.data_list)
+
+    def get(self, idx):
+        return self.data_list[idx]
+
+    @property
+    def processed_file_names(self):
+        return ["processed.pt"]
+
+    def process(self) -> None:
+        filename = "train.npy" if self.train else "valid.npy"
+        trajectory = np.load(f"{self.root}/{filename}", allow_pickle=True)
+        trajectory_dataset = trajectory[self.index : self.num_trajectory + self.index]
+
+        num_timesteps_pertraj = (
+            trajectory_dataset[0]["solution_low"][
                 0 : self.endtime : self.step_size
             ].shape[0]
             - 1
         )
-        self.var = var
 
-    def len(self):
-        return self.num_timesteps_pertraj * self.num_trajectory
+        data_list = []
+        for idx in range(num_timesteps_pertraj * self.num_trajectory):
+            data = self.get_raw(idx, num_timesteps_pertraj, trajectory_dataset)
+            if self.pre_transform is not None:
+                data = self.pre_transform(data)
+            data_list.append(data)
 
-    def get(self, idx):
-        trajnum = int(np.floor(idx / self.num_timesteps_pertraj))
-        traj = self.trajectory_dataset[trajnum]
+        torch.save(data_list, self.processed_paths[0])
+
+    def get_raw(self, idx, num_timesteps_pertraj, trajectory_dataset):
+        trajnum = int(np.floor(idx / num_timesteps_pertraj))
+        traj = trajectory_dataset[trajnum]
         U_solution = torch.tensor(
             traj["solution_low"][0 : self.endtime : self.step_size]
         )
@@ -108,7 +131,7 @@ class wave_data_2D_irrgular(Dataset):
         edge_nodes = torch.tensor(edge_nodes) * 1
         node_type = torch.tensor(np.array(traj["is_boundary_low"])).reshape(-1, 1)
 
-        i = int(idx - trajnum * self.num_timesteps_pertraj)
+        i = int(idx - trajnum * num_timesteps_pertraj)
 
         input_node_features = {}
         input_edge_features = {}
@@ -201,7 +224,7 @@ class wave_data_2D_irrgular(Dataset):
             x_eval=x_eval,
             cell=edges,
             num_nodes=num_nodes,
-            coords=coords,
+            coords=torch.tensor(coords),
             unroll_v_gt=unroll_v_gt,
             unroll_u_gt=unroll_u_gt,
             a_gt=input_node_features["a_gt_eval"],

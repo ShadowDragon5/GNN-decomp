@@ -3,9 +3,12 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from utils import get_data
+
 from .common import Trainer
 
 
+# FIXME: did not update to match new model/loss definitions
 class MGN_trainer(Trainer):
     """
     Mesh Graph Net trainer
@@ -35,11 +38,10 @@ class MGN_trainer(Trainer):
                 disable=self.quiet,
             ):
                 data.to(self.device)
-
                 optimizer.zero_grad()
 
-                out = self.model(data)
-                loss = self.model.loss(out, data)
+                out, y = self.model(**get_data(data))
+                loss = self.model.loss(out, y)
 
                 train_loss += loss.detach().item()
 
@@ -65,7 +67,7 @@ class MGN_trainer(Trainer):
 
         return self.test()
 
-    def validate(self, model, dataloader=None) -> tuple[float, float]:
+    def validate(self, model, dataloader=None):
         if dataloader is None:
             dataloader = self.validloader
 
@@ -81,12 +83,13 @@ class MGN_trainer(Trainer):
             ):
                 data.to(self.device)
 
-                out = model(data)
-                loss = model.loss(out, data)
+                out, y = self.model(**get_data(data))
+                loss = self.model.loss(out, y)
+
                 valid_loss += loss.detach().item()
 
         valid_loss /= len(self.validloader)
-        return np.inf, valid_loss
+        return None, valid_loss
 
     def test(self) -> float:
         _, loss = self.validate(self.model)

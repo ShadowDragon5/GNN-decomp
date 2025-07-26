@@ -81,7 +81,7 @@ class MeshGraphNet(GNN):
         # message passing with different MLP for each steps
         self.processors = torch.nn.Sequential(
             *[
-                processor(self.hidden_dim, self.hidden_dim, layer_norm=True)
+                Processor(self.hidden_dim, self.hidden_dim, layer_norm=True)
                 for _ in range(num_steps)
             ]
         )
@@ -94,56 +94,57 @@ class MeshGraphNet(GNN):
             layer_norm=False,
         )
 
-        self.normalizer_node_feature = Normalizer(self.in_dim)
-        self.normalizer_edge_feature = Normalizer(edge_dim)
-        self.normalizer_v_gt = Normalizer(1)
+        self.normalizer_node_feature = Normalizer(self.in_dim, self.device)
+        self.normalizer_edge_feature = Normalizer(edge_dim, self.device)
+        self.normalizer_v_gt = Normalizer(1, self.device)
 
-    def encoder(self, graph):
-        graph.x[:, :-1] = graph.x[:, :-1]
-        graph.noise = graph.x[:, [-1]] * 0
+    # def encoder(self, graph):
+    #     # graph.noise = graph.x[:, [-1]] * 0
+    #
+    #     graph.x = self.encoder_nodes(graph.x)
+    #     graph.edge_attr = self.encoder_edge(graph.edge_attr)
+    #     return graph
 
-        graph.x = self.encoder_nodes(graph.x)
-        graph.edge_attr = self.encoder_edge(graph.edge_attr)
-        return graph
+    # def decoder(self, graph):
+    #     graph.x = self.decoder_node(graph.x)
+    #     return graph
 
-    def decoder(self, graph):
-        graph.x = self.decoder_node(graph.x)
-        return graph
-
-    def forward(self, graph, train=False):
+    def forward(self, x, edge_index, edge_attr, v_gt, **_):
         # normalize the dataset
-        graph.x = self.normalizer_node_feature.update(graph.x, train)
-        graph.edge_attr = self.normalizer_edge_feature.update(graph.edge_attr, train)
-        graph.v_gt = self.normalizer_v_gt.update(graph.v_gt, train)
+        x = self.normalizer_node_feature.update(x, self.training)
+        edge_attr = self.normalizer_edge_feature.update(edge_attr, self.training)
+        v_gt = self.normalizer_v_gt.update(v_gt, self.training)
 
         # ecode edges and nodes to latent dim
-        graph_latent = self.encoder(graph.clone())
+        # graph_latent = self.encoder(graph.clone())
+        x = self.encoder_nodes(x)
+        edge_attr = self.encoder_edge(edge_attr)
 
         # message passing steps with different MLP each time
         for i in range(self.num_steps):
-            graph_latent = self.processors[i](graph_latent)
+            x, edge_attr = self.processors[i](x, edge_index, edge_attr)
 
         # decoding
-        graph_latent = self.decoder(graph_latent)
-        graph_latent.x = graph_latent.x / 10  # div 10 for 46, div 100 for 31
-        if not train:
-            graph_latent.x = self.normalizer_v_gt.reverse(graph_latent.x)
-        graph_latent.eval = graph_latent.x
-        return graph_latent
+        # graph_latent = self.decoder(graph_latent)
+        x = self.decoder_node(x)
+        x = x / 10  # div 10 for 46, div 100 for 31
+        if not self.training:
+            x = self.normalizer_v_gt.reverse(x)
+        # graph_latent.eval = graph_latent.x
+        return x, v_gt
 
     def loss(self, pred, label) -> torch.Tensor:
-        """MSE"""
-        gnn_prdiction = pred.eval[:, :]
-        gt = pred.v_gt[:, :].to(self.device) - pred.noise[:, 0]
-        # else:
-        #     gnn_prdiction = pred.eval[:, :]
-        #     gt = pred.v_gt[:, :].to(self.device)
-        return ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()
+        """MSE
+        pred = x
+        label = v_gt
+        """
+        # gt = pred.v_gt[:, :].to(self.device)
+        return ((pred[:, 0] - label[:, 0]) ** 2).mean()
 
 
-class processor(MessagePassing):
+class Processor(MessagePassing):
     def __init__(self, in_channels, out_channels, layer_norm=False):
-        super(processor, self).__init__(aggr="add")  # "Add" aggregation.
+        super(Processor, self).__init__(aggr="add")  # "Add" aggregation.
         self.edge_encoder = FCBlock(
             in_features=in_channels * 3,
             out_features=out_channels,
@@ -160,27 +161,26 @@ class processor(MessagePassing):
         )
         self.latent_dim = out_channels
 
-    def forward(self, graph):
-        edge_index = graph.edge_index
+    def forward(self, x, edge_index, edge_attr):
         # cat features together (eij,vi,ei)
         x_receiver = torch.gather(
-            graph.x, 0, edge_index[0, :].unsqueeze(-1).repeat(1, graph.x.shape[1])
+            x, 0, edge_index[0, :].unsqueeze(-1).repeat(1, x.shape[1])
         )
         x_sender = torch.gather(
-            graph.x, 0, edge_index[1, :].unsqueeze(-1).repeat(1, graph.x.shape[1])
+            x, 0, edge_index[1, :].unsqueeze(-1).repeat(1, x.shape[1])
         )
-        edge_features = torch.cat([x_receiver, x_sender, graph.edge_attr], dim=-1)
+        edge_features = torch.cat([x_receiver, x_sender, edge_attr], dim=-1)
         # edge processor
         edge_features = self.edge_encoder(edge_features)
 
         # aggregate edge_features
-        node_features = self.propagate(edge_index, x=graph.x, edge_attr=edge_features)
+        node_features = self.propagate(edge_index, x=x, edge_attr=edge_features)
         # cat features for node processor (vi,\sum_eij)
-        features = torch.cat([graph.x, node_features[:, self.latent_dim :]], dim=-1)
+        features = torch.cat([x, node_features[:, self.latent_dim :]], dim=-1)
         # node processor and update graph
-        graph.x = self.node_encoder(features) + graph.x
-        graph.edge_attr = edge_features
-        return graph
+        x = self.node_encoder(features) + x
+        edge_attr = edge_features
+        return x, edge_attr
 
     def message(self, x_i, edge_attr):
         z = torch.cat([x_i, edge_attr], dim=-1)
@@ -188,7 +188,7 @@ class processor(MessagePassing):
 
 
 class Normalizer(nn.Module):
-    def __init__(self, dim, max_acc=60 * 600, device="cpu"):
+    def __init__(self, dim, device, max_acc=60 * 600):
         super().__init__()
         self.device = device
         self.acc_sum = nn.Parameter(torch.zeros(dim).to(device), requires_grad=False)
