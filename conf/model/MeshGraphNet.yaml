@@ -4,7 +4,7 @@ hidden_dim: 128
 out_dim: 1
 dropout: 0.0
 
-lr: 1e-5
+lr: 1e-4
 wd: 0.0
 
 pre_lr: 0.0

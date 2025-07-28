@@ -298,6 +298,7 @@ def main(cfg: DictConfig):
                     "seed": cfg.seed,
                     "trainer": cfg.trainer,
                     "model": cfg.model.base,
+                    "hidden_dim": cfg.model.hidden_dim,
                     "dataset": cfg.dataset,
                     "batch": cfg.dev.batch,
                     "epochs": cfg.epochs,

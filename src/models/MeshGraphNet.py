@@ -59,7 +59,6 @@ class MeshGraphNet(GNN):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # node_dim = self.in_dim
 
         self.encoder_edge = FCBlock(
             in_features=edge_dim,
@@ -98,17 +97,6 @@ class MeshGraphNet(GNN):
         self.normalizer_edge_feature = Normalizer(edge_dim, self.device)
         self.normalizer_v_gt = Normalizer(1, self.device)
 
-    # def encoder(self, graph):
-    #     # graph.noise = graph.x[:, [-1]] * 0
-    #
-    #     graph.x = self.encoder_nodes(graph.x)
-    #     graph.edge_attr = self.encoder_edge(graph.edge_attr)
-    #     return graph
-
-    # def decoder(self, graph):
-    #     graph.x = self.decoder_node(graph.x)
-    #     return graph
-
     def forward(self, x, edge_index, edge_attr, v_gt, **_):
         # normalize the dataset
         x = self.normalizer_node_feature.update(x, self.training)
@@ -116,7 +104,6 @@ class MeshGraphNet(GNN):
         v_gt = self.normalizer_v_gt.update(v_gt, self.training)
 
         # ecode edges and nodes to latent dim
-        # graph_latent = self.encoder(graph.clone())
         x = self.encoder_nodes(x)
         edge_attr = self.encoder_edge(edge_attr)
 
@@ -125,12 +112,10 @@ class MeshGraphNet(GNN):
             x, edge_attr = self.processors[i](x, edge_index, edge_attr)
 
         # decoding
-        # graph_latent = self.decoder(graph_latent)
         x = self.decoder_node(x)
         x = x / 10  # div 10 for 46, div 100 for 31
         if not self.training:
             x = self.normalizer_v_gt.reverse(x)
-        # graph_latent.eval = graph_latent.x
         return x, v_gt
 
     def loss(self, pred, label) -> torch.Tensor:

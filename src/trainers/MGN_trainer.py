@@ -1,4 +1,5 @@
 import mlflow
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -18,9 +19,9 @@ class MGN_trainer(Trainer):
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
-        # scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        #     optimizer, gamma=np.exp(np.log(1e-4) / self.epochs * 20), last_epoch=-1
-        # )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=np.exp(np.log(1e-4) / self.epochs * 20), last_epoch=-1
+        )
 
         self.model.to(self.device)
 
@@ -50,7 +51,8 @@ class MGN_trainer(Trainer):
 
             # Validation
             _, valid_loss = self.validate(self.model)
-            # scheduler.step(valid_loss)
+            if epoch % 20 == 0 and epoch != 0:
+                scheduler.step()
 
             if not self.quiet:
                 print(f"{self.name} Epoch: {epoch:03} | Valid Loss: {valid_loss}")
