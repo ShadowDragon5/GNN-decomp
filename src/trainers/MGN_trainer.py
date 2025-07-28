@@ -1,5 +1,4 @@
 import mlflow
-import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -8,7 +7,6 @@ from utils import get_data
 from .common import Trainer
 
 
-# FIXME: did not update to match new model/loss definitions
 class MGN_trainer(Trainer):
     """
     Mesh Graph Net trainer

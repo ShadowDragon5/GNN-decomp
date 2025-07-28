@@ -138,8 +138,9 @@ class MeshGraphNet(GNN):
         pred = x
         label = v_gt
         """
-        # gt = pred.v_gt[:, :].to(self.device)
-        return ((pred[:, 0] - label[:, 0]) ** 2).mean()
+        gnn_prdiction = pred[:, :]
+        gt = label[:, :].to(self.device)
+        return ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()
 
 
 class Processor(MessagePassing):
