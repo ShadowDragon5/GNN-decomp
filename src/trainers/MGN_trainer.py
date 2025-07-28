@@ -39,8 +39,9 @@ class MGN_trainer(Trainer):
                 data.to(self.device)
                 optimizer.zero_grad()
 
-                out, y = self.model(**get_data(data))
-                loss = self.model.loss(out, y)
+                # out, y = self.model(**get_data(data))
+                out = self.model(data)
+                loss = self.model.loss(out, data)
 
                 train_loss += loss.detach().item()
 
@@ -83,8 +84,10 @@ class MGN_trainer(Trainer):
             ):
                 data.to(self.device)
 
-                out, y = self.model(**get_data(data))
-                loss = self.model.loss(out, y)
+                # out, y = self.model(**get_data(data))
+                # loss = self.model.loss(out, y)
+                out = self.model(data)
+                loss = self.model.loss(out, data)
 
                 valid_loss += loss.detach().item()
 

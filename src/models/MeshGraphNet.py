@@ -59,6 +59,7 @@ class MeshGraphNet(GNN):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # node_dim = self.in_dim
 
         self.encoder_edge = FCBlock(
             in_features=edge_dim,
@@ -97,34 +98,48 @@ class MeshGraphNet(GNN):
         self.normalizer_edge_feature = Normalizer(edge_dim, self.device)
         self.normalizer_v_gt = Normalizer(1, self.device)
 
-    def forward(self, x, edge_index, edge_attr, v_gt, **_):
+    def encoder(self, graph):
+        graph.x[:, :-1] = graph.x[:, :-1]
+        graph.noise = graph.x[:, [-1]] * 0
+
+        graph.x = self.encoder_nodes(graph.x)
+        graph.edge_attr = self.encoder_edge(graph.edge_attr)
+        return graph
+
+    def decoder(self, graph):
+        graph.x = self.decoder_node(graph.x)
+        return graph
+
+    def forward(self, graph):
         # normalize the dataset
-        x = self.normalizer_node_feature.update(x, self.training)
-        edge_attr = self.normalizer_edge_feature.update(edge_attr, self.training)
-        v_gt = self.normalizer_v_gt.update(v_gt, self.training)
+        graph.x = self.normalizer_node_feature.update(graph.x, self.training)
+        graph.edge_attr = self.normalizer_edge_feature.update(
+            graph.edge_attr, self.training
+        )
+        graph.v_gt = self.normalizer_v_gt.update(graph.v_gt, self.training)
 
         # ecode edges and nodes to latent dim
-        x = self.encoder_nodes(x)
-        edge_attr = self.encoder_edge(edge_attr)
+        graph_latent = self.encoder(graph.clone())
 
         # message passing steps with different MLP each time
         for i in range(self.num_steps):
-            x, edge_attr = self.processors[i](x, edge_index, edge_attr)
+            graph_latent = self.processors[i](graph_latent)
 
         # decoding
-        x = self.decoder_node(x)
-        x = x / 10  # div 10 for 46, div 100 for 31
+        graph_latent = self.decoder(graph_latent)
+        graph_latent.x = graph_latent.x / 10  # div 10 for 46, div 100 for 31
         if not self.training:
-            x = self.normalizer_v_gt.reverse(x)
-        return x, v_gt
+            graph_latent.x = self.normalizer_v_gt.reverse(graph_latent.x)
+        graph_latent.eval = graph_latent.x
+        return graph_latent
 
     def loss(self, pred, label) -> torch.Tensor:
-        """MSE
-        pred = x
-        label = v_gt
-        """
-        gnn_prdiction = pred[:, :]
-        gt = label[:, :].to(self.device)
+        """MSE"""
+        gnn_prdiction = pred.eval[:, :]
+        gt = pred.v_gt[:, :].to(self.device) - pred.noise[:, 0]
+        # else:
+        #     gnn_prdiction = pred.eval[:, :]
+        #     gt = pred.v_gt[:, :].to(self.device)
         return ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()
 
 
@@ -147,26 +162,27 @@ class Processor(MessagePassing):
         )
         self.latent_dim = out_channels
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, graph):
+        edge_index = graph.edge_index
         # cat features together (eij,vi,ei)
         x_receiver = torch.gather(
-            x, 0, edge_index[0, :].unsqueeze(-1).repeat(1, x.shape[1])
+            graph.x, 0, edge_index[0, :].unsqueeze(-1).repeat(1, graph.x.shape[1])
         )
         x_sender = torch.gather(
-            x, 0, edge_index[1, :].unsqueeze(-1).repeat(1, x.shape[1])
+            graph.x, 0, edge_index[1, :].unsqueeze(-1).repeat(1, graph.x.shape[1])
         )
-        edge_features = torch.cat([x_receiver, x_sender, edge_attr], dim=-1)
+        edge_features = torch.cat([x_receiver, x_sender, graph.edge_attr], dim=-1)
         # edge processor
         edge_features = self.edge_encoder(edge_features)
 
         # aggregate edge_features
-        node_features = self.propagate(edge_index, x=x, edge_attr=edge_features)
+        node_features = self.propagate(edge_index, x=graph.x, edge_attr=edge_features)
         # cat features for node processor (vi,\sum_eij)
-        features = torch.cat([x, node_features[:, self.latent_dim :]], dim=-1)
+        features = torch.cat([graph.x, node_features[:, self.latent_dim :]], dim=-1)
         # node processor and update graph
-        x = self.node_encoder(features) + x
-        edge_attr = edge_features
-        return x, edge_attr
+        graph.x = self.node_encoder(features) + graph.x
+        graph.edge_attr = edge_features
+        return graph
 
     def message(self, x_i, edge_attr):
         z = torch.cat([x_i, edge_attr], dim=-1)
