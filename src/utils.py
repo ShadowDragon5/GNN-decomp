@@ -6,17 +6,14 @@ from torch_geometric.data import Data
 
 
 class PartitionedData(Data):
-    def get_x(self, i, device):
-        return self.get("x", i, device)
-
-    def get_y(self, i, device):
-        return self.get("y", i, device)
-
-    def get_edge_index(self, i, device):
-        return self.get("edge_index", i, device)
-
     def get(self, attr: str, i: int, device):
-        return getattr(self, f"{attr}_{i}").to(device)
+        if attr == "batch":
+            return self.get_batch(i, device)
+
+        a = getattr(self, f"{attr}_{i}", None)
+        if a is None:
+            return None
+        return a.to(device)
 
     def get_batch(self, i, device):
         # if (batch := getattr(self, f"batch_{i}", None)) is not None:
