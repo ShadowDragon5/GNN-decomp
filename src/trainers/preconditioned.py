@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 import mlflow
 import torch
+from mlflow.pytorch import log_model
 from numpy import ceil
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
@@ -150,7 +151,7 @@ class Preconditioned(Trainer):
                 mlflow.log_metrics(
                     {
                         f"pre_{i}/loss": vloss,
-                        # f"pre_{i}/acc": acc,
+                        **({f"pre_{i}/acc": acc} if acc is not None else {}),
                     },
                     step=epoch * self.pre_epochs + pre_epoch,
                 )
@@ -257,7 +258,7 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "before_pre/loss": vloss,
-                    # "before_pre/acc": acc,
+                    **({"before_pre/acc": acc} if acc is not None else {}),
                     "grad/global_L2": grad_norm,
                 },
                 step=epoch,
@@ -392,7 +393,7 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "after_pre/loss": vloss,
-                    # "after_pre/acc": acc,
+                    **({"after_pre/acc": acc} if acc is not None else {}),
                 },
                 step=epoch,
             )
@@ -410,7 +411,7 @@ class Preconditioned(Trainer):
                 scaled_epochs += 1
 
             # Validation
-            accuracy, valid_loss = self.validate(self.model)
+            acc, valid_loss = self.validate(self.model)
 
             scheduler.step(valid_loss)
 
@@ -422,7 +423,7 @@ class Preconditioned(Trainer):
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
-                    # "validate/accuracy": accuracy,
+                    **({"validate/accuracy": acc} if acc is not None else {}),
                 },
                 step=epoch,
             )
@@ -430,19 +431,19 @@ class Preconditioned(Trainer):
             mlflow.log_metrics(
                 {
                     "validate/scaled_loss": valid_loss,
-                    # "validate/scaled_accuracy": accuracy,
+                    **({"validate/scaled_accuracy": acc} if acc is not None else {}),
                 },
                 step=scaled_epochs - 1,
             )
 
             if epoch % 10 == 9:
-                mlflow.pytorch.log_model(self.model, "model")
+                log_model(self.model, "model")
 
-        # accuracy = self.test()
-        # if not self.quiet:
-        #     print(f"Accuracy: {accuracy}")
-        #
-        # mlflow.log_metric("test/accuracy", accuracy)
+        accuracy = self.test()
+        if not self.quiet:
+            print(f"Accuracy: {accuracy}")
+
+        mlflow.log_metric("test/accuracy", accuracy)
 
         return valid_loss
 

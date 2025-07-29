@@ -46,6 +46,7 @@ def get_data(data, i=None, device=None) -> dict:
                 "edge_attr",
                 "batch",
                 "v_gt",
+                "gt",
             ]
         }
     return {
@@ -57,6 +58,7 @@ def get_data(data, i=None, device=None) -> dict:
             "edge_attr",
             "batch",
             "v_gt",
+            "gt",
         ]
     }
 

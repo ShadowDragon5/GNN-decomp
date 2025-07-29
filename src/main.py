@@ -10,6 +10,7 @@ import networkx as nx
 import numpy as np
 import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
+from mlflow.pytorch import log_model
 from omegaconf import DictConfig
 from torch_geometric.data import Dataset
 from torch_geometric.datasets import GNNBenchmarkDataset
@@ -96,7 +97,7 @@ def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Da
             endtime=250,
             root=root_str,
             node_features=["u", "v", "density", "type"],
-            num_trajectory=100,
+            num_trajectory=1,
             step_size=5,
             train=False,
             var=0,
@@ -323,11 +324,12 @@ def main(cfg: DictConfig):
                 epochs=cfg.epochs,
                 gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
                 target=cfg.target,
+                need_acc=cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"],
                 **trainer_params,
             )
             loss = trainer.run()
 
-            mlflow.pytorch.log_model(trainer.model, "model")
+            log_model(trainer.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
     # TODO: add hardware metrics
