@@ -126,7 +126,7 @@ class Preconditioned(Trainer):
                 # batch = data.get_batch(i, self.device)
                 # y = data.get_y(i, self.device)
 
-                out, y = model(**get_data(i, self.device))
+                out, y = model(**get_data(data, i, self.device))
                 loss = model.loss(out, y)
 
                 pre_train_loss += loss.detach().item()
