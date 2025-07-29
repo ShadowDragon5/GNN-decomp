@@ -36,31 +36,19 @@ torch.serialization.add_safe_globals([PartitionedData])
 
 
 def get_data(data, i=None, device=None) -> dict:
+    keys = [
+        "x",
+        "x_eval",
+        "y",
+        "edge_index",
+        "edge_attr",
+        "batch",
+        "v_gt",
+        "gt",
+    ]
     if i is None:
-        return {
-            k: getattr(data, k, None)
-            for k in [
-                "x",
-                "y",
-                "edge_index",
-                "edge_attr",
-                "batch",
-                "v_gt",
-                "gt",
-            ]
-        }
-    return {
-        k: data.get(k, i, device)
-        for k in [
-            "x",
-            "y",
-            "edge_index",
-            "edge_attr",
-            "batch",
-            "v_gt",
-            "gt",
-        ]
-    }
+        return {k: getattr(data, k, None) for k in keys}
+    return {k: data.get(k, i, device) for k in keys}
 
 
 def position_transform(data: Data) -> Data:

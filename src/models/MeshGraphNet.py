@@ -97,7 +97,7 @@ class MeshGraphNet(GNN):
         self.normalizer_edge_feature = Normalizer(edge_dim, self.device)
         self.normalizer_v_gt = Normalizer(1, self.device)
 
-    def forward(self, x, edge_index, edge_attr, v_gt, gt, **_):
+    def forward(self, x, edge_index, edge_attr, v_gt, gt, x_eval, **_):
         # normalize the dataset
         x = self.normalizer_node_feature.update(x, self.training)
         edge_attr = self.normalizer_edge_feature.update(edge_attr, self.training)
@@ -116,7 +116,7 @@ class MeshGraphNet(GNN):
         x = x / 10  # div 10 for 46, div 100 for 31
         if not self.training:
             x = self.normalizer_v_gt.reverse(x)
-            return x, gt
+            return x_eval + x, gt
 
         return x, v_gt
 
