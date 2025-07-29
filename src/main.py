@@ -96,7 +96,7 @@ def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Da
             endtime=250,
             root=root_str,
             node_features=["u", "v", "density", "type"],
-            num_trajectory=100,
+            num_trajectory=1,
             step_size=5,
             train=False,
             var=0,

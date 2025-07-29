@@ -59,7 +59,6 @@ class MeshGraphNet(GNN):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # node_dim = self.in_dim
 
         self.encoder_edge = FCBlock(
             in_features=edge_dim,
@@ -119,7 +118,7 @@ class MeshGraphNet(GNN):
         graph.v_gt = self.normalizer_v_gt.update(graph.v_gt, self.training)
 
         # ecode edges and nodes to latent dim
-        graph_latent = self.encoder(graph.clone())
+        graph_latent = self.encoder(graph)
 
         # message passing steps with different MLP each time
         for i in range(self.num_steps):
