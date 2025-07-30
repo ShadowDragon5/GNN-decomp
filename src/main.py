@@ -138,21 +138,21 @@ def main(cfg: DictConfig):
         trainset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=True,
-        pin_memory=True,
+        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     validloader = DataLoader(
         validset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
-        pin_memory=True,
+        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     testloader = DataLoader(
         testset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
-        pin_memory=True,
+        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
 
@@ -194,7 +194,7 @@ def main(cfg: DictConfig):
             shuffle=True,
             # NOTE: results in x_0_batch
             follow_batch=[f"x_{i}" for i in range(cfg.partitions)],
-            pin_memory=True,
+            # pin_memory=True,
             num_workers=cfg.dev.num_workers,
         )
 

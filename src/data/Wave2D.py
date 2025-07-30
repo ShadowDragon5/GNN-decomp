@@ -64,7 +64,9 @@ class wave_data_2D_irrgular(Dataset):
 
         super().__init__(root=root, **kwargs)
 
-        self.data_list = torch.load(self.processed_paths[0], weights_only=False)
+        self.data_list = torch.load(
+            self.processed_paths[0], weights_only=False, mmap=True
+        )
 
     def len(self):
         return len(self.data_list)
