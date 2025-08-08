@@ -146,32 +146,32 @@ class Preconditioned(Trainer):
             pre_train_loss /= len(self.part_trainloader)
             pre_scheduler.step(pre_train_loss)
 
-            if pre_epoch % 19 == 0:
-                acc, vloss = self.validate(model)
-                mlflow.log_metrics(
-                    {
-                        f"pre_{i}/loss": vloss,
-                        **({f"pre_{i}/acc": acc} if acc is not None else {}),
-                    },
-                    step=epoch * self.pre_epochs + pre_epoch,
-                )
+            # if pre_epoch % 19 == 0:
+            #     acc, vloss = self.validate(model)
+            #     mlflow.log_metrics(
+            #         {
+            #             f"pre_{i}/loss": vloss,
+            #             **({f"pre_{i}/acc": acc} if acc is not None else {}),
+            #         },
+            #         step=epoch * self.pre_epochs + pre_epoch,
+            #     )
 
-            delta_w = deepcopy(model.state_dict())
-            apply_to_models(
-                delta_w,
-                lambda a, b: a - b,
-                weights_0,
-            )
-            dot = parameter_dot(grad, delta_w)
-            mlflow.log_metrics(
-                {
-                    f"pre_train/loss_p{i}": pre_train_loss,
-                    f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
-                    f"pre_{i}/dot": dot,
-                },
-                step=epoch * self.pre_epochs + pre_epoch,
-                # step=epoch * (self.pre_epochs + 1) + pre_epoch,
-            )
+            # delta_w = deepcopy(model.state_dict())
+            # apply_to_models(
+            #     delta_w,
+            #     lambda a, b: a - b,
+            #     weights_0,
+            # )
+            # dot = parameter_dot(grad, delta_w)
+            # mlflow.log_metrics(
+            #     {
+            #         f"pre_train/loss_p{i}": pre_train_loss,
+            #         f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
+            #         f"pre_{i}/dot": dot,
+            #     },
+            #     step=epoch * self.pre_epochs + pre_epoch,
+            #     # step=epoch * (self.pre_epochs + 1) + pre_epoch,
+            # )
 
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
@@ -251,18 +251,18 @@ class Preconditioned(Trainer):
         scaled_epochs = 0
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
-            grad_norm = parameter_norm(grad_train)
+            # grad_norm = parameter_norm(grad_train)
 
-            # LOGGING
-            acc, vloss = self.validate(self.model)
-            mlflow.log_metrics(
-                {
-                    "before_pre/loss": vloss,
-                    **({"before_pre/acc": acc} if acc is not None else {}),
-                    "grad/global_L2": grad_norm,
-                },
-                step=epoch,
-            )
+            # # LOGGING
+            # acc, vloss = self.validate(self.model)
+            # mlflow.log_metrics(
+            #     {
+            #         "before_pre/loss": vloss,
+            #         **({"before_pre/acc": acc} if acc is not None else {}),
+            #         "grad/global_L2": grad_norm,
+            #     },
+            #     step=epoch,
+            # )
 
             w0 = deepcopy(self.model.state_dict())
 
@@ -388,15 +388,15 @@ class Preconditioned(Trainer):
                 step=epoch,
             )
 
-            # LOGGING
-            acc, vloss = self.validate(self.model)
-            mlflow.log_metrics(
-                {
-                    "after_pre/loss": vloss,
-                    **({"after_pre/acc": acc} if acc is not None else {}),
-                },
-                step=epoch,
-            )
+            # # LOGGING
+            # acc, vloss = self.validate(self.model)
+            # mlflow.log_metrics(
+            #     {
+            #         "after_pre/loss": vloss,
+            #         **({"after_pre/acc": acc} if acc is not None else {}),
+            #     },
+            #     step=epoch,
+            # )
 
             # Full pass
             train_loss = 0
@@ -511,12 +511,12 @@ class Preconditioned(Trainer):
         gammas = torch.ones(self.num_parts, requires_grad=True)
         gamma_optim = torch.optim.Adam([gammas], lr=0.01)
 
-        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #     gamma_optim,
-        #     mode="min",
-        #     factor=0.5,
-        #     patience=5,
-        # )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            gamma_optim,
+            mode="min",
+            factor=0.5,
+            patience=5,
+        )
 
         es = EarlyStopping(patience=10)
 
@@ -578,7 +578,7 @@ class Preconditioned(Trainer):
                 step=epoch + N_EPOCHS * global_epoch,
             )
 
-            # scheduler.step(valid_loss)
+            scheduler.step(valid_loss)
             if es.step(valid_loss):
                 break
 
