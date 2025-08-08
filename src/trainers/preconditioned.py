@@ -511,12 +511,12 @@ class Preconditioned(Trainer):
         gammas = torch.ones(self.num_parts, requires_grad=True)
         gamma_optim = torch.optim.Adam([gammas], lr=0.01)
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            gamma_optim,
-            mode="min",
-            factor=0.5,
-            patience=5,
-        )
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     gamma_optim,
+        #     mode="min",
+        #     factor=0.5,
+        #     patience=5,
+        # )
 
         es = EarlyStopping(patience=10)
 
@@ -578,7 +578,7 @@ class Preconditioned(Trainer):
                 step=epoch + N_EPOCHS * global_epoch,
             )
 
-            scheduler.step(valid_loss)
+            # scheduler.step(valid_loss)
             if es.step(valid_loss):
                 break
 
