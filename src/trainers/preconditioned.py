@@ -96,6 +96,7 @@ class Preconditioned(Trainer):
         """
         model = deepcopy(model).to(self.device)
         weights_0 = deepcopy(model.state_dict())
+        model.train()
 
         pre_optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, weight_decay=self.pre_wd
@@ -121,10 +122,6 @@ class Preconditioned(Trainer):
                 disable=self.quiet,
             ):
                 data: PartitionedData = data
-                # x = data.get_x(i, self.device)
-                # edge_index = data.get_edge_index(i, self.device)
-                # batch = data.get_batch(i, self.device)
-                # y = data.get_y(i, self.device)
 
                 out, y = model(**get_data(data, i, self.device))
                 loss = model.loss(out, y)
@@ -156,22 +153,22 @@ class Preconditioned(Trainer):
             #         step=epoch * self.pre_epochs + pre_epoch,
             #     )
 
-            # delta_w = deepcopy(model.state_dict())
-            # apply_to_models(
-            #     delta_w,
-            #     lambda a, b: a - b,
-            #     weights_0,
-            # )
-            # dot = parameter_dot(grad, delta_w)
-            # mlflow.log_metrics(
-            #     {
-            #         f"pre_train/loss_p{i}": pre_train_loss,
-            #         f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
-            #         f"pre_{i}/dot": dot,
-            #     },
-            #     step=epoch * self.pre_epochs + pre_epoch,
-            #     # step=epoch * (self.pre_epochs + 1) + pre_epoch,
-            # )
+            delta_w = deepcopy(model.state_dict())
+            apply_to_models(
+                delta_w,
+                lambda a, b: a - b,
+                weights_0,
+            )
+            dot = parameter_dot(grad, delta_w)
+            mlflow.log_metrics(
+                {
+                    f"pre_train/loss_p{i}": pre_train_loss,
+                    f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
+                    f"pre_{i}/dot": dot,
+                },
+                step=epoch * self.pre_epochs + pre_epoch,
+                # step=epoch * (self.pre_epochs + 1) + pre_epoch,
+            )
 
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
@@ -251,18 +248,18 @@ class Preconditioned(Trainer):
         scaled_epochs = 0
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
-            # grad_norm = parameter_norm(grad_train)
+            grad_norm = parameter_norm(grad_train)
 
-            # # LOGGING
-            # acc, vloss = self.validate(self.model)
-            # mlflow.log_metrics(
-            #     {
-            #         "before_pre/loss": vloss,
-            #         **({"before_pre/acc": acc} if acc is not None else {}),
-            #         "grad/global_L2": grad_norm,
-            #     },
-            #     step=epoch,
-            # )
+            # LOGGING
+            acc, vloss = self.validate(self.model)
+            mlflow.log_metrics(
+                {
+                    "before_pre/loss": vloss,
+                    **({"before_pre/acc": acc} if acc is not None else {}),
+                    "grad/global_L2": grad_norm,
+                },
+                step=epoch,
+            )
 
             w0 = deepcopy(self.model.state_dict())
 
@@ -388,15 +385,15 @@ class Preconditioned(Trainer):
                 step=epoch,
             )
 
-            # # LOGGING
-            # acc, vloss = self.validate(self.model)
-            # mlflow.log_metrics(
-            #     {
-            #         "after_pre/loss": vloss,
-            #         **({"after_pre/acc": acc} if acc is not None else {}),
-            #     },
-            #     step=epoch,
-            # )
+            # LOGGING
+            acc, vloss = self.validate(self.model)
+            mlflow.log_metrics(
+                {
+                    "after_pre/loss": vloss,
+                    **({"after_pre/acc": acc} if acc is not None else {}),
+                },
+                step=epoch,
+            )
 
             # Full pass
             train_loss = 0
