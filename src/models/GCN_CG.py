@@ -50,40 +50,44 @@ if __name__ == "__main__":
         hidden_dim=146,
         out_dim=146,
         in_dim=5,
-        n_classes=2,
+        n_classes=10,
         dropout=0,
         device="cpu",
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
     # cloned = deepcopy(model)
     # cloned_dict = deepcopy(model.state_dict())
     model.train()
-    print("Initial")
-    print(model.state_dict()["embedding_h.weight"][:10])
+
+    print(sum(p.numel() for p in model.parameters()))
+
+    # print("Initial")
+    # print(model.state_dict()["embedding_h.weight"][:10])
+    # # print(next(model.parameters())[:10])
+    #
+    # x = torch.ones(5, 5)
+    # y = torch.tensor([1], dtype=torch.int64)
+    #
+    # edge_index = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 3, 4, 0]])
+    #
+    # out, y = model(x, y, edge_index, None)
+    # loss = model.loss(out, y)
+    # print(loss.item())
+    # loss.backward()
+    # optimizer.step()
+    # model.eval()
+    #
+    # out, y = model(x, y, edge_index, None)
+    # loss = model.loss(out, y)
+    # print(loss.item())
+    # loss.backward()
+    # optimizer.step()
+    #
+    # print("Optimized")
+    # print(model.state_dict()["embedding_h.weight"][:10])
     # print(next(model.parameters())[:10])
-
-    x = torch.ones(5, 5)
-    y = torch.tensor([1], dtype=torch.int64)
-
-    edge_index = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 3, 4, 0]])
-
-    out, y = model(x, y, edge_index, None)
-    loss = model.loss(out, y)
-    print(loss.item())
-    loss.backward()
-    optimizer.step()
-
-    out, y = model(x, y, edge_index, None)
-    loss = model.loss(out, y)
-    print(loss.item())
-    loss.backward()
-    optimizer.step()
-
-    print("Optimized")
-    print(model.state_dict()["embedding_h.weight"][:10])
-    print(next(model.parameters())[:10])
-
-    print("Cloned")
+    #
+    # print("Cloned")
     # print(cloned_dict["embedding_h.weight"][:10])
     # print(next(cloned.parameters())[:10])
 

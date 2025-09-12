@@ -69,6 +69,10 @@ class Trainer(ABC):
                 out, y = model(**get_data(data))
                 loss = model.loss(out, y)
                 valid_loss += loss.detach().item()
+                if loss.detach().item() == torch.nan:
+                    print("NaN loss")
+                    print(out.detach())
+                    print(y.detach())
 
                 # Validation accuracy
                 if self.need_acc:
@@ -134,5 +138,5 @@ class EarlyStopping:
     def _init_is_better(self, mode: Literal["min", "max"], min_delta: float):
         if mode == "min":
             self.is_better = lambda a, best: a < best - min_delta
-        elif mode == "max":
+        else:
             self.is_better = lambda a, best: a > best + min_delta

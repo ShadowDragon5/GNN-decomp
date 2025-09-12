@@ -1,5 +1,5 @@
 from copy import deepcopy
-from enum import Enum
+from enum import StrEnum, auto
 from typing import Any, Callable
 
 import mlflow
@@ -18,12 +18,12 @@ from utils import PartitionedData, get_data
 from .common import EarlyStopping, Trainer
 
 
-class GAMMA_ALGO(Enum):
+class GAMMA_ALGO(StrEnum):
     """Contribution combination algorithm that determines the gamma weights"""
 
-    NONE = "none"
-    BACKTRACKING = "backtracking"
-    BRENT = "brent"
+    NONE = auto()
+    BACKTRACKING = auto()
+    BRENT = auto()
     SGD = "SGD"
 
 
@@ -144,7 +144,7 @@ class Preconditioned(Trainer):
             pre_scheduler.step(pre_train_loss)
 
             # if pre_epoch % 19 == 0:
-            #     acc, vloss = self.validate(model)
+            #     acc, vloss = self.validate(model)  # model.eval
             #     mlflow.log_metrics(
             #         {
             #             f"pre_{i}/loss": vloss,
@@ -202,26 +202,27 @@ class Preconditioned(Trainer):
             return loss
 
         gamma = 1.0
-        if self.gamma_algo == GAMMA_ALGO.BRENT:
-            gamma = minimize_scalar(
-                objective,
-                bounds=(0, 1),
-                method="bounded",
-                options={
-                    "maxiter": 10,
-                    "xatol": 1e-3,
-                },
-            ).x  # type: ignore
+        match self.gamma_algo:
+            case GAMMA_ALGO.BRENT:
+                gamma = minimize_scalar(
+                    objective,
+                    bounds=(0, 1),
+                    method="bounded",
+                    options={
+                        "maxiter": 10,
+                        "xatol": 1e-3,
+                    },
+                ).x  # type: ignore
 
-        elif self.gamma_algo == GAMMA_ALGO.BACKTRACKING:
-            beta = 0.5
-            _, fx = self.validate(model, self.targetloader)
-            for _ in range(10):
-                if objective(gamma) < fx:
-                    break
-                gamma *= beta
-            else:  # no valid gamma found, disable contribution
-                return weights, 0.0
+            case GAMMA_ALGO.BACKTRACKING:
+                beta = 0.5
+                _, fx = self.validate(model, self.targetloader)
+                for _ in range(10):
+                    if objective(gamma) < fx:
+                        break
+                    gamma *= beta
+                else:  # no valid gamma found, disable contribution
+                    return weights, 0.0
 
         apply_to_models(
             weights,
@@ -248,7 +249,6 @@ class Preconditioned(Trainer):
         scaled_epochs = 0
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
-            grad_norm = parameter_norm(grad_train)
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -256,7 +256,6 @@ class Preconditioned(Trainer):
                 {
                     "before_pre/loss": vloss,
                     **({"before_pre/acc": acc} if acc is not None else {}),
-                    "grad/global_L2": grad_norm,
                 },
                 step=epoch,
             )
@@ -272,18 +271,16 @@ class Preconditioned(Trainer):
                         model=self.model,
                         # self.pre_lr,
                         lr=scheduler.get_last_lr()[0],  # pass down the lr
-                        optim_state=optimizer.state_dict(),
+                        optim_state=deepcopy(optimizer.state_dict()),
                         i=i,
                         epoch=epoch,
                         grad=grad_train,
                     )
                     contributions.append(delta_w)
 
-                    contrib_norm = parameter_norm(delta_w)
                     dot = parameter_dot(grad_train, delta_w)
                     mlflow.log_metrics(
                         {
-                            f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
                         },
                         step=epoch,
@@ -291,7 +288,7 @@ class Preconditioned(Trainer):
 
                 # Contribution combination
                 if self.gamma_algo == GAMMA_ALGO.SGD:
-                    gammas = self.optimize_gammas(contributions, epoch)
+                    gammas = self.optimize_gammas(contributions, epoch)  # model.eval()
 
                     for i, gamma in enumerate(gammas):
                         mlflow.log_metrics(
@@ -343,7 +340,7 @@ class Preconditioned(Trainer):
                     delta_w = self.precondition(
                         model=self.model,
                         lr=scheduler.get_last_lr()[0],  # pass down the lr
-                        optim_state=optimizer.state_dict(),
+                        optim_state=deepcopy(optimizer.state_dict()),
                         i=i,
                         epoch=epoch,
                         grad=grad_train,
@@ -351,12 +348,10 @@ class Preconditioned(Trainer):
                     w_new, gamma = self.optimal_combination(self.model, delta_w)
 
                     self.model.load_state_dict(w_new)
-                    contrib_norm = parameter_norm(delta_w)
                     dot = parameter_dot(grad_train, delta_w)
                     mlflow.log_metrics(
                         {
                             f"gamma/p{i}": gamma,
-                            f"grad/p{i}_L2": contrib_norm,
                             f"grad/p{i}_dot": dot,
                         },
                         step=epoch,
@@ -375,18 +370,17 @@ class Preconditioned(Trainer):
                 lambda a, b: a - b,
                 w0,
             )
-            pre_norm = parameter_norm(diff)
             dot = parameter_dot(grad_train, diff)
             mlflow.log_metrics(
                 {
-                    "grad/pre_L2": pre_norm,
                     "grad/pre_dot": dot,
                 },
                 step=epoch,
             )
 
             # LOGGING
-            acc, vloss = self.validate(self.model)
+            # BUG: sometimes vloss is none
+            acc, vloss = self.validate(self.model)  # model.eval()
             mlflow.log_metrics(
                 {
                     "after_pre/loss": vloss,
@@ -398,7 +392,7 @@ class Preconditioned(Trainer):
             # Full pass
             train_loss = 0
             for _ in range(self.full_epochs):
-                train_loss = self.train(optimizer, epoch)
+                train_loss = self.train(optimizer, epoch)  # model.train()
                 mlflow.log_metrics(
                     {
                         "train/scaled_loss": train_loss,
@@ -501,11 +495,15 @@ class Preconditioned(Trainer):
         train_loss /= len(self.trainloader)
         return train_loss
 
+    # NOTE: Causes sharp deterioration in performance when stuck in local minimum (starting with ones)
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
 
         N_EPOCHS = 1000
-        gammas = torch.ones(self.num_parts, requires_grad=True)
+        # gammas = torch.ones(self.num_parts, requires_grad=True)
+        gammas = torch.zeros(
+            self.num_parts, requires_grad=True
+        )  # start with no contributions
         gamma_optim = torch.optim.Adam([gammas], lr=0.01)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -542,7 +540,7 @@ class Preconditioned(Trainer):
             ):
                 data.to(self.device)
                 # Gamma.T * Theta
-                # rebuilding required for computational graph
+                # NOTE: rebuilding required for computational graph
                 theta = deepcopy(params)
                 for i, delta_w in enumerate(contributions):
                     apply_to_models(
@@ -555,7 +553,7 @@ class Preconditioned(Trainer):
                     self.model, (theta, buffers), kwargs=get_data(data)
                 )
                 loss = self.model.loss(out, y)
-                valid_loss += loss.detach().item() / len(self.targetloader)
+                valid_loss += loss.detach().item()
 
                 (grad,) = torch.autograd.grad(loss, gammas)
                 gammas.grad = grad.detach()
@@ -566,6 +564,7 @@ class Preconditioned(Trainer):
                 # correct += (pred == y).sum().item()
                 # total += y.size(0)
 
+            valid_loss /= len(self.targetloader)
             mlflow.log_metrics(
                 {
                     "gamma_optim/loss": valid_loss,

@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum, auto
 from logging import warning
 from pathlib import Path
 from typing import Callable, Type
@@ -44,70 +45,86 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
 }
 
 
+class DS(StrEnum):
+    """Dataset"""
+
+    @staticmethod
+    def _generate_next_value_(name: str, *_, **__) -> str:
+        return name
+
+    MNIST = auto()
+    CIFAR10 = auto()
+    PATTERN = auto()
+    Wave2D = auto()
+
+
 def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dataset]:
     """
     name: The name of the dataset
         (one of `"PATTERN"`, `"MNIST"`, `"CIFAR10"`, `"Wave2D"`)
     """
 
-    if name in ["CIFAR10", "MNIST", "PATTERN"]:
-        preprocessing = position_transform if name in ["CIFAR10", "MNIST"] else None
+    match name:
+        case DS.CIFAR10 | DS.MNIST | DS.PATTERN:
+            preprocessing = None
+            if name in [DS.CIFAR10, DS.MNIST]:
+                preprocessing = position_transform
 
-        root_str = str(root)
-        trainset = GNNBenchmarkDataset(
-            root=root_str,
-            name=name,
-            split="train",
-            pre_transform=preprocessing,
-            force_reload=reload,
-        )
+            root_str = str(root)
+            trainset = GNNBenchmarkDataset(
+                root=root_str,
+                name=name,
+                split="train",
+                pre_transform=preprocessing,
+                force_reload=reload,
+            )
 
-        validset = GNNBenchmarkDataset(
-            root=root_str,
-            name=name,
-            split="val",
-            pre_transform=preprocessing,
-            force_reload=reload,
-        )
+            validset = GNNBenchmarkDataset(
+                root=root_str,
+                name=name,
+                split="val",
+                pre_transform=preprocessing,
+                force_reload=reload,
+            )
 
-        testset = GNNBenchmarkDataset(
-            root=root_str,
-            name=name,
-            split="test",
-            pre_transform=preprocessing,
-            force_reload=reload,
-        )
+            testset = GNNBenchmarkDataset(
+                root=root_str,
+                name=name,
+                split="test",
+                pre_transform=preprocessing,
+                force_reload=reload,
+            )
 
-    elif name == "Wave2D":
-        root_str = str(root / "PDE/training")
-        trainset = wave_data_2D_irrgular(
-            edge_features=["dist", "direction"],
-            endtime=250,
-            root=root_str,
-            node_features=["u", "v", "density", "type"],
-            num_trajectory=1000,
-            step_size=5,
-            train=True,
-            var=0,
-            force_reload=reload,
-        )
+        case DS.Wave2D:
+            root_str = str(root / "PDE/training")
+            trainset = wave_data_2D_irrgular(
+                edge_features=["dist", "direction"],
+                endtime=250,
+                root=root_str,
+                node_features=["u", "v", "density", "type"],
+                num_trajectory=1000,
+                step_size=5,
+                train=True,
+                var=0,
+                force_reload=reload,
+            )
 
-        validset = wave_data_2D_irrgular(
-            edge_features=["dist", "direction"],
-            endtime=250,
-            root=root_str,
-            node_features=["u", "v", "density", "type"],
-            num_trajectory=1,
-            step_size=5,
-            train=False,
-            var=0,
-            force_reload=reload,
-        )
+            validset = wave_data_2D_irrgular(
+                edge_features=["dist", "direction"],
+                endtime=250,
+                root=root_str,
+                node_features=["u", "v", "density", "type"],
+                num_trajectory=1,
+                step_size=5,
+                train=False,
+                var=0,
+                force_reload=reload,
+            )
 
-        testset = validset
+            testset = validset
 
-    else:
-        raise Exception(f"Unkown dataset {name}")
+        case _:
+            raise Exception(f"Unkown dataset {name}")
 
     return trainset, validset, testset
 
@@ -138,21 +155,18 @@ def main(cfg: DictConfig):
         trainset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=True,
-        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     validloader = DataLoader(
         validset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
-        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
     testloader = DataLoader(
         testset,  # type: ignore
         batch_size=cfg.dev.batch,
         shuffle=False,
-        # pin_memory=True,
         num_workers=cfg.dev.num_workers,
     )
 
@@ -160,32 +174,33 @@ def main(cfg: DictConfig):
     has_pre = cfg.partitions > 1
     if has_pre:
         partset = None
-        if cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"]:
-            partset = GNNBenchmarkDataset(
-                root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
-                name=cfg.dataset,
-                split="train",
-                pre_transform=lambda data: partition_transform_global(
-                    data if cfg.dataset == "PATTERN" else position_transform(data),
-                    cfg.partitions,
-                ),
-                force_reload=cfg.u,
-            )
-        elif cfg.dataset == "Wave2D":
-            partset = wave_data_2D_irrgular(
-                edge_features=["dist", "direction"],
-                endtime=250,
-                root=str(dataset_dir / f"PDE/partitioned_{cfg.partitions}"),
-                node_features=["u", "v", "density", "type"],
-                num_trajectory=1000,
-                step_size=5,
-                train=True,
-                var=0,
-                pre_transform=lambda data: partition_transform_global(
-                    data, cfg.partitions
-                ),
-                force_reload=cfg.u,
-            )
+        match cfg.dataset:
+            case DS.CIFAR10 | DS.MNIST | DS.PATTERN:
+                partset = GNNBenchmarkDataset(
+                    root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
+                    name=cfg.dataset,
+                    split="train",
+                    pre_transform=lambda data: partition_transform_global(
+                        data if cfg.dataset == DS.PATTERN else position_transform(data),
+                        cfg.partitions,
+                    ),
+                    force_reload=cfg.u,
+                )
+            case DS.Wave2D:
+                partset = wave_data_2D_irrgular(
+                    edge_features=["dist", "direction"],
+                    endtime=250,
+                    root=str(dataset_dir / f"PDE/partitioned_{cfg.partitions}"),
+                    node_features=["u", "v", "density", "type"],
+                    num_trajectory=1000,
+                    step_size=5,
+                    train=True,
+                    var=0,
+                    pre_transform=lambda data: partition_transform_global(
+                        data, cfg.partitions
+                    ),
+                    force_reload=cfg.u,
+                )
         assert partset is not None
 
         part_trainloader = DataLoader(
@@ -240,18 +255,15 @@ def main(cfg: DictConfig):
 
     # learning rates and weight decays
     # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
-    # ruff: noqa: E712
     search_space = {
-        "lr": cfg.model.lr,  # if cfg.model.lr != True else hp.choice("lr", LRnWDs),
-        "wd": cfg.model.wd,  # if cfg.model.wd != True else hp.choice("wd", LRnWDs),
+        "lr": cfg.model.lr,
+        "wd": cfg.model.wd,
         **(
             {
                 "pre_epochs": cfg.pre_epochs,
                 "full_epochs": cfg.full_epochs,
                 # "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
                 # "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
-                # if cfg.pre_epochs != True
-                # else 5 * hp.uniformint("pre_epochs", 1, 8),
                 "pre_lr": cfg.model.pre_lr,
                 # if args.pre_lr is not None
                 # else hp.choice("pre_lr", LRnWDs),
@@ -276,8 +288,8 @@ def main(cfg: DictConfig):
 
     def objective(trainer_params):
         n_classes = None
-        if cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"]:
-            n_classes = trainset.num_classes  # type: ignore
+        if cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN]:
+            n_classes = trainset.num_classes
 
         model = MODELS[cfg.model.base](
             in_dim=trainset.num_features,
@@ -324,7 +336,7 @@ def main(cfg: DictConfig):
                 epochs=cfg.epochs,
                 gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
                 target=cfg.target,
-                need_acc=cfg.dataset in ["CIFAR10", "MNIST", "PATTERN"],
+                need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
                 **trainer_params,
             )
             loss = trainer.run()
@@ -347,15 +359,6 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     try:
-        # from torch.profiler import ProfilerActivity, profile, tensorboard_trace_handler
-        # with profile(
-        #     activities=[ProfilerActivity.CPU],
-        #     on_trace_ready=tensorboard_trace_handler("./log"),
-        #     with_stack=True,  # OOM
-        # ) as p:
-        #     main()
-        # # print(p.key_averages().table())
-
         main()
     except KeyboardInterrupt:
         print("Stopping...")
