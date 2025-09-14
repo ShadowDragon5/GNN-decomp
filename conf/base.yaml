@@ -15,6 +15,7 @@ target: train
 # Additive Schwarz flag (defaults to Multiplicative Schwarz)
 ASM: false
 gamma_algo: none
+optim: Adam
 
 seed: 42
 epochs: 100

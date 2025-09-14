@@ -32,7 +32,12 @@ class PartitionedData(Data):
 torch.serialization.add_safe_globals([PartitionedData])
 
 
-def get_data(data, i=None, device=None) -> dict:
+def get_data(data: Data | PartitionedData, i=None, device=None) -> dict:
+    """
+    data: Data object from which the `keys` will be extracted into a dictionary
+    i: (optional) partition index of the partitioned data
+    device: (optional) is only needed if i is provided and sets the device of the parameter tensor
+    """
     keys = [
         "x",
         "x_eval",

@@ -44,6 +44,11 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "mgn-batched": MGN_trainer,  # MGN baseline
 }
 
+OPTIM = {
+    "Adam": torch.optim.Adam,
+    "SGD": torch.optim.SGD,
+}
+
 
 class DS(StrEnum):
     """Dataset"""
@@ -310,6 +315,7 @@ def main(cfg: DictConfig):
                 {
                     "seed": cfg.seed,
                     "trainer": cfg.trainer,
+                    "optimizer": cfg.optim,
                     "model": cfg.model.base,
                     "hidden_dim": cfg.model.hidden_dim,
                     "dataset": cfg.dataset,
@@ -337,6 +343,7 @@ def main(cfg: DictConfig):
                 gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
                 target=cfg.target,
                 need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
+                optim=OPTIM[cfg.optim],
                 **trainer_params,
             )
             loss = trainer.run()

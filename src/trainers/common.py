@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Literal, Type
 
 import torch
+from torch.optim import SGD, Adam
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -23,6 +24,7 @@ class Trainer(ABC):
         epochs: int,
         lr: float,
         wd: float,
+        optim: Type[Adam | SGD],
         quiet: bool = False,
         need_acc: bool = False,
         **_,
@@ -38,6 +40,7 @@ class Trainer(ABC):
         self.wd = wd
         self.quiet = quiet
         self.need_acc = need_acc
+        self.optim = optim
 
     @abstractmethod
     def run(self) -> float:

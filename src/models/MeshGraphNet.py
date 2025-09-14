@@ -170,7 +170,7 @@ class Processor(MessagePassing):
         edge_attr = edge_features
         return x, edge_attr
 
-    def message(self, x_i, edge_attr):
+    def message(self, x_i, edge_attr):  # type: ignore
         z = torch.cat([x_i, edge_attr], dim=-1)
         return z
 

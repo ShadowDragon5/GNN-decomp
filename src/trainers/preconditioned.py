@@ -13,7 +13,7 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from models.common import GNN
-from utils import PartitionedData, get_data
+from utils import get_data
 
 from .common import EarlyStopping, Trainer
 
@@ -98,9 +98,10 @@ class Preconditioned(Trainer):
         weights_0 = deepcopy(model.state_dict())
         model.train()
 
-        pre_optimizer = torch.optim.Adam(
-            model.parameters(), lr=lr, weight_decay=self.pre_wd
-        )
+        # pre_optimizer = torch.optim.Adam(
+        #     model.parameters(), lr=lr, weight_decay=self.pre_wd
+        # )
+        pre_optimizer = self.optim(model.parameters(), lr=lr, weight_decay=self.pre_wd)
         pre_optimizer.load_state_dict(optim_state)
 
         pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -121,8 +122,6 @@ class Preconditioned(Trainer):
                 leave=False,
                 disable=self.quiet,
             ):
-                data: PartitionedData = data
-
                 out, y = model(**get_data(data, i, self.device))
                 loss = model.loss(out, y)
 
@@ -232,7 +231,7 @@ class Preconditioned(Trainer):
         return weights, gamma
 
     def run(self) -> float:
-        optimizer = torch.optim.Adam(
+        optimizer = self.optim(
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
@@ -504,7 +503,7 @@ class Preconditioned(Trainer):
         gammas = torch.zeros(
             self.num_parts, requires_grad=True
         )  # start with no contributions
-        gamma_optim = torch.optim.Adam([gammas], lr=0.01)
+        gamma_optim = self.optim([gammas], lr=0.01)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             gamma_optim,
