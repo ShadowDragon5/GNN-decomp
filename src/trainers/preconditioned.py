@@ -98,10 +98,9 @@ class Preconditioned(Trainer):
         weights_0 = deepcopy(model.state_dict())
         model.train()
 
-        # pre_optimizer = torch.optim.Adam(
-        #     model.parameters(), lr=lr, weight_decay=self.pre_wd
-        # )
-        pre_optimizer = self.optim(model.parameters(), lr=lr, weight_decay=self.pre_wd)
+        pre_optimizer = torch.optim.Adam(
+            model.parameters(), lr=lr, weight_decay=self.pre_wd
+        )
         pre_optimizer.load_state_dict(optim_state)
 
         pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -231,7 +230,7 @@ class Preconditioned(Trainer):
         return weights, gamma
 
     def run(self) -> float:
-        optimizer = self.optim(
+        optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
@@ -503,7 +502,7 @@ class Preconditioned(Trainer):
         gammas = torch.zeros(
             self.num_parts, requires_grad=True
         )  # start with no contributions
-        gamma_optim = self.optim([gammas], lr=0.01)
+        gamma_optim = self.optim(params=[gammas], lr=0.01)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             gamma_optim,
