@@ -82,7 +82,7 @@ class Preconditioned(Trainer):
 
     def precondition(
         self,
-        model: GNN,
+        model_g: GNN,
         lr: float,
         optim_state: dict,
         i: int,
@@ -94,8 +94,8 @@ class Preconditioned(Trainer):
         epoch: global epoch for logging
         returns: difference in model weights after the preconditioning
         """
-        model = deepcopy(model).to(self.device)
-        weights_0 = deepcopy(model.state_dict())
+        model = deepcopy(model_g).to(self.device)
+        weights_0 = deepcopy(model_g.state_dict())
         model.train()
 
         pre_optimizer = torch.optim.Adam(
@@ -151,22 +151,22 @@ class Preconditioned(Trainer):
             #         step=epoch * self.pre_epochs + pre_epoch,
             #     )
 
-            delta_w = deepcopy(model.state_dict())
-            apply_to_models(
-                delta_w,
-                lambda a, b: a - b,
-                weights_0,
-            )
-            dot = parameter_dot(grad, delta_w)
-            mlflow.log_metrics(
-                {
-                    f"pre_train/loss_p{i}": pre_train_loss,
-                    f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
-                    f"pre_{i}/dot": dot,
-                },
-                step=epoch * self.pre_epochs + pre_epoch,
-                # step=epoch * (self.pre_epochs + 1) + pre_epoch,
-            )
+            # delta_w = deepcopy(model.state_dict())
+            # apply_to_models(
+            #     delta_w,
+            #     lambda a, b: a - b,
+            #     weights_0,
+            # )
+            # dot = parameter_dot(grad, delta_w)
+            # mlflow.log_metrics(
+            #     {
+            #         f"pre_train/loss_p{i}": pre_train_loss,
+            #         f"pre_train/lr_p{i}": pre_scheduler.get_last_lr()[0],
+            #         f"pre_{i}/dot": dot,
+            #     },
+            #     step=epoch * self.pre_epochs + pre_epoch,
+            #     # step=epoch * (self.pre_epochs + 1) + pre_epoch,
+            # )
 
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
@@ -247,6 +247,7 @@ class Preconditioned(Trainer):
         scaled_epochs = 0
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
+            grad_norm = parameter_norm(grad_train)
 
             # LOGGING
             acc, vloss = self.validate(self.model)
@@ -254,6 +255,7 @@ class Preconditioned(Trainer):
                 {
                     "before_pre/loss": vloss,
                     **({"before_pre/acc": acc} if acc is not None else {}),
+                    "grad/global_L2": grad_norm,
                 },
                 step=epoch,
             )
@@ -266,7 +268,7 @@ class Preconditioned(Trainer):
 
                 for i in range(self.num_parts):
                     delta_w = self.precondition(
-                        model=self.model,
+                        model_g=self.model,
                         # self.pre_lr,
                         lr=scheduler.get_last_lr()[0],  # pass down the lr
                         optim_state=deepcopy(optimizer.state_dict()),
@@ -336,7 +338,7 @@ class Preconditioned(Trainer):
                         grad_train = self.get_global_grad(epoch, self.trainloader)
 
                     delta_w = self.precondition(
-                        model=self.model,
+                        model_g=self.model,
                         lr=scheduler.get_last_lr()[0],  # pass down the lr
                         optim_state=deepcopy(optimizer.state_dict()),
                         i=i,
@@ -368,10 +370,12 @@ class Preconditioned(Trainer):
                 lambda a, b: a - b,
                 w0,
             )
+            pre_norm = parameter_norm(diff)
             dot = parameter_dot(grad_train, diff)
             mlflow.log_metrics(
                 {
                     "grad/pre_dot": dot,
+                    "grad/pre_L2": pre_norm,
                 },
                 step=epoch,
             )

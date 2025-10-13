@@ -1,0 +1,21 @@
+[project]
+name = "gnn-decomp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "hydra-core",
+    "hyperopt",
+    "matplotlib",
+    "mlflow",
+    "mlflow-skinny",
+    "networkx",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "torch-geometric",
+    "tqdm",
+]
