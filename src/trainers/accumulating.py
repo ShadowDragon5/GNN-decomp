@@ -2,6 +2,8 @@ import mlflow
 import torch
 from tqdm import tqdm
 
+from utils import get_data
+
 from .common import Trainer
 
 
@@ -21,6 +23,7 @@ class Accumulating(Trainer):
         )
 
         self.model.to(self.device)
+
         valid_loss = 0
         for epoch in range(self.epochs):
             train_loss = 0
@@ -32,13 +35,9 @@ class Accumulating(Trainer):
                 dynamic_ncols=True,
                 disable=self.quiet,
             ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
+                data.to(self.device)
 
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
-                out = self.model(x, edge_index, batch)
+                out, y = self.model(**get_data(data))
                 loss = self.model.loss(out, y)
 
                 train_loss += loss.detach().item()
@@ -53,18 +52,17 @@ class Accumulating(Trainer):
 
             # Validation
             accuracy, valid_loss = self.validate(self.model)
-
             scheduler.step(valid_loss)
 
             if not self.quiet:
-                print(f"{self.name} Epoch: {epoch:03} | " f"Valid Loss: {valid_loss}")
+                print(f"{self.name} Epoch: {epoch:03} | Valid Loss: {valid_loss}")
 
             mlflow.log_metrics(
                 {
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
-                    "validate/accuracy": accuracy,
+                    **({"validate/accuracy": accuracy} if accuracy is not None else {}),
                 },
                 step=epoch,
             )

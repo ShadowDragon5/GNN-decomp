@@ -2,6 +2,8 @@ import mlflow
 import torch
 from tqdm import tqdm
 
+from utils import get_data
+
 from .common import Trainer
 
 
@@ -36,13 +38,9 @@ class Batched(Trainer):
                 dynamic_ncols=True,
                 disable=self.quiet,
             ):
-                x = data.x.to(self.device)
-                y = data.y.to(self.device)
+                data.to(self.device)
 
-                edge_index = data.edge_index.to(self.device)
-                batch = data.batch.to(self.device)
-
-                out = self.model(x, edge_index, batch)
+                out, y = self.model(**get_data(data))
                 loss = self.model.loss(out, y)
 
                 train_loss += loss.detach().item()
@@ -65,7 +63,7 @@ class Batched(Trainer):
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
                     "validate/loss": valid_loss,
-                    "validate/accuracy": accuracy,
+                    **({"validate/accuracy": accuracy} if accuracy is not None else {}),
                 },
                 step=epoch,
             )
