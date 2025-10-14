@@ -8,7 +8,7 @@ dependencies = [
     "hydra-core",
     "hyperopt",
     "matplotlib",
-    "mlflow",
+    "mlflow<3",
     "mlflow-skinny",
     "networkx",
     "numpy",
