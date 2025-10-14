@@ -7,6 +7,7 @@ from typing import Callable, Type
 import hydra
 import matplotlib.pyplot as plt
 import mlflow
+import mlflow.environment_variables as mlenv
 import networkx as nx
 import numpy as np
 import torch
@@ -28,6 +29,9 @@ from trainers import (
     Trainer,
 )
 from utils import partition_transform_global, position_transform
+
+mlenv.MLFLOW_DISABLE_TELEMETRY = True
+
 
 MODELS = {
     "GCN_CG": GCN_CG,
@@ -355,6 +359,9 @@ def main(cfg: DictConfig):
 
     # TODO: add hardware metrics
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
+    mlflow.set_experiment_tag(
+        "mlflow.experimentKind", "custom_model_development_inferred"
+    )
     trials = Trials()
     fmin(
         fn=objective,
