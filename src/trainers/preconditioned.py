@@ -2,7 +2,10 @@ from copy import deepcopy
 from enum import StrEnum, auto
 from typing import Any, Callable
 
+import matplotlib.pyplot as plt
 import mlflow
+import numpy as np
+import pandas as pd
 import torch
 from mlflow.pytorch import log_model
 from numpy import ceil
@@ -501,11 +504,17 @@ class Preconditioned(Trainer):
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
 
+        if self.num_parts == 2 and (
+            global_epoch in [1, 2, 3, 4] or global_epoch % 10 == 0
+        ):
+            self.loss_landscape(contributions, global_epoch)
+
         N_EPOCHS = 1000
         # gammas = torch.ones(self.num_parts, requires_grad=True)
         gammas = torch.zeros(
             self.num_parts, requires_grad=True
         )  # start with no contributions
+        gamma_history = [gammas.detach().cpu().clone().numpy()]
         gamma_optim = self.optim(params=[gammas], lr=0.01)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -561,6 +570,8 @@ class Preconditioned(Trainer):
                 gammas.grad = grad.detach()
                 gamma_optim.step()
 
+                gamma_history.append(gammas.detach().cpu().clone().numpy())
+
                 # # accuracy
                 # pred = out.argmax(dim=1)  # Predicted labels
                 # correct += (pred == y).sum().item()
@@ -580,4 +591,85 @@ class Preconditioned(Trainer):
             if es.step(valid_loss):
                 break
 
+        path = f"results/{mlflow.active_run().info.run_id}_gamma_history_{global_epoch:03}.csv"  # type: ignore
+        df = pd.DataFrame(gamma_history)
+        df.to_csv(path)
+        mlflow.log_artifact(path)
+
         return gammas.detach().cpu().numpy()
+
+    def loss_landscape(
+        self,
+        contributions,
+        global_epoch,
+        grid_n: int = 20,
+        gamma_min: float = -0.5,
+        gamma_max: float = 1.5,
+    ):
+        self.model.eval()
+        params = {}
+        buffers = {}
+        for key, val in self.model.state_dict().items():
+            if key in dict(self.model.named_buffers()):
+                buffers[key] = val.clone()
+            else:
+                params[key] = val.clone()
+
+        def loss_fn(gammas):
+            theta = deepcopy(params)
+            for i, delta_w in enumerate(contributions):
+                apply_to_models(
+                    theta,
+                    lambda a, b: a + gammas[i] * b,
+                    delta_w,
+                )
+
+            total_loss = torch.tensor([0.0], device=self.device)
+            for data in tqdm(
+                self.targetloader,
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+            ):
+                data.to(self.device)
+
+                out, y = functional_call(
+                    self.model, (theta, buffers), kwargs=get_data(data)
+                )
+                loss = self.model.loss(out, y)
+                total_loss += loss
+            return total_loss / len(self.targetloader)
+
+        X = np.linspace(gamma_min, gamma_max, grid_n)
+        Z = np.ndarray((grid_n, grid_n))
+        for idx in range(grid_n):
+            for idy in range(grid_n):
+                Z[idx, idy] = loss_fn(torch.tensor([X[idx], X[idy]])).detach().item()
+
+        # # Compute hessian and check if it's positive semi-definite
+        # gammas = torch.zeros(self.num_parts, requires_grad=True)
+        # H = torch.autograd.functional.hessian(loss_fn, gammas)  # type: ignore
+        # H = H.detach().cpu().numpy()  # type: ignore
+        # mlflow.log_table(
+        #     pd.DataFrame(H), artifact_file=f"hessian_{global_epoch:03}.json"
+        # )
+
+        # Plot and log the loss landscape
+        fig, ax = plt.subplots()
+        im = ax.matshow(Z, cmap="managua")
+        fig.colorbar(im)
+
+        labels = [f"{g:.2f}" for g in X]
+        ax.set_xticklabels(labels)
+        ax.set_yticklabels(labels)
+
+        fig.tight_layout()
+        mlflow.log_figure(
+            fig,
+            artifact_file=f"loss_landscape_{global_epoch:03}.pdf",
+        )
+
+        path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.csv"  # type: ignore
+        df = pd.DataFrame(Z, columns=X)
+        df.to_csv(path)
+        mlflow.log_artifact(path)

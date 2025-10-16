@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum, auto
 from logging import warning
+from os import makedirs
 from pathlib import Path
 from typing import Callable, Type
 
@@ -138,6 +139,7 @@ def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Da
 
 @hydra.main(version_base=None, config_path="../conf")
 def main(cfg: DictConfig):
+    makedirs("results", exist_ok=True)
     dataset_dir = Path(cfg.dev.data_dir)
 
     if not torch.cuda.is_available():
