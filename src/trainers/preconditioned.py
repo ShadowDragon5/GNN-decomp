@@ -65,6 +65,7 @@ class Preconditioned(Trainer):
         pre_wd: float = 0,
         batched: bool = False,
         target: str = "train",
+        ll_resolution: int = 20,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -77,6 +78,7 @@ class Preconditioned(Trainer):
         self.pre_lr = pre_lr
         self.pre_wd = pre_wd
         self.batched = batched
+        self.ll_resolution = ll_resolution
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -384,7 +386,6 @@ class Preconditioned(Trainer):
             )
 
             # LOGGING
-            # BUG: sometimes vloss is none
             acc, vloss = self.validate(self.model)  # model.eval()
             mlflow.log_metrics(
                 {
@@ -501,13 +502,14 @@ class Preconditioned(Trainer):
         return train_loss
 
     # NOTE: Causes sharp deterioration in performance when stuck in local minimum (starting with ones)
+    # BUG: sometimes gammas are nan
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
 
         if self.num_parts == 2 and (
             global_epoch in [1, 2, 3, 4] or global_epoch % 10 == 0
         ):
-            self.loss_landscape(contributions, global_epoch)
+            self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
         # gammas = torch.ones(self.num_parts, requires_grad=True)
@@ -602,10 +604,13 @@ class Preconditioned(Trainer):
         self,
         contributions,
         global_epoch,
-        grid_n: int = 20,
+        grid_n: int,
         gamma_min: float = -0.5,
         gamma_max: float = 1.5,
     ):
+        if grid_n <= 0:
+            return
+
         self.model.eval()
         params = {}
         buffers = {}
@@ -646,7 +651,8 @@ class Preconditioned(Trainer):
             for idy in range(grid_n):
                 Z[idx, idy] = loss_fn(torch.tensor([X[idx], X[idy]])).detach().item()
 
-        # # Compute hessian and check if it's positive semi-definite
+        # FIXME: average out the batched version
+        # # Compute Hessian
         # gammas = torch.zeros(self.num_parts, requires_grad=True)
         # H = torch.autograd.functional.hessian(loss_fn, gammas)  # type: ignore
         # H = H.detach().cpu().numpy()  # type: ignore

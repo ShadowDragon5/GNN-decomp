@@ -348,6 +348,7 @@ def main(cfg: DictConfig):
                 target=cfg.target,
                 need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
                 optim=OPTIM[cfg.optim],
+                ll_resolution=cfg.ll_resolution,
                 **trainer_params,
             )
             loss = trainer.run()
