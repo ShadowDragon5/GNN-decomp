@@ -67,6 +67,7 @@ class Preconditioned(Trainer):
         batched: bool = False,
         target: str = "train",
         ll_resolution: int = 20,
+        gamma_lr: float = 0.01,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -80,6 +81,7 @@ class Preconditioned(Trainer):
         self.pre_wd = pre_wd
         self.batched = batched
         self.ll_resolution = ll_resolution
+        self.gamma_lr = gamma_lr
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -503,7 +505,7 @@ class Preconditioned(Trainer):
         return train_loss
 
     # NOTE: Causes sharp deterioration in performance when stuck in local minimum (starting with ones)
-    # BUG: sometimes gammas are nan
+    # BUG: exploding gradient
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
 
@@ -518,7 +520,7 @@ class Preconditioned(Trainer):
             self.num_parts, requires_grad=True
         )  # start with no contributions
         gamma_history = [gammas.detach().cpu().clone().numpy()]
-        gamma_optim = self.optim(params=[gammas], lr=0.01)
+        gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             gamma_optim,
@@ -586,7 +588,7 @@ class Preconditioned(Trainer):
                     "gamma_optim/loss": valid_loss,
                     # "gamma_optim/accuracy": correct / total,
                 },
-                # BUG: early stopping causes gaps in the plot
+                # NOTE: early stopping causes gaps in the plot
                 step=epoch + N_EPOCHS * global_epoch,
             )
 

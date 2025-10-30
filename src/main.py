@@ -328,6 +328,7 @@ def main(cfg: DictConfig):
                     "epochs": cfg.epochs,
                     "additive": cfg.ASM,
                     "line search": cfg.gamma_algo,
+                    "gamma opt. lr": cfg.gamma_lr,
                     "partitions": cfg.partitions,
                     "optim target": cfg.target,
                     **trainer_params,
@@ -350,6 +351,7 @@ def main(cfg: DictConfig):
                 need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
                 optim=OPTIM[cfg.optim],
                 ll_resolution=cfg.ll_resolution,
+                gamma_lr=cfg.gamma_lr,
                 **trainer_params,
             )
             loss = trainer.run()
@@ -357,7 +359,6 @@ def main(cfg: DictConfig):
             log_model(trainer.model, "model")
         return {"loss": loss, "status": STATUS_OK}
 
-    # TODO: add hardware metrics
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
     trials = Trials()
     fmin(
