@@ -7,6 +7,7 @@ import mlflow
 import numpy as np
 import pandas as pd
 import torch
+from matplotlib.colors import LogNorm
 from mlflow.pytorch import log_model
 from numpy import ceil
 from scipy.optimize import minimize_scalar
@@ -662,12 +663,13 @@ class Preconditioned(Trainer):
 
         # Plot and log the loss landscape
         fig, ax = plt.subplots()
-        im = ax.matshow(Z, cmap="managua")
-        fig.colorbar(im)
-
-        labels = [f"{g:.2f}" for g in X]
-        ax.set_xticklabels(labels)
-        ax.set_yticklabels(labels)
+        im = ax.imshow(
+            Z,
+            extent=(gamma_min, gamma_max, gamma_min, gamma_max),
+            cmap="managua",
+            norm=LogNorm(vmin=Z.min() + 1e-10, vmax=Z.max()),
+        )
+        fig.colorbar(im, label="Loss")
 
         fig.tight_layout()
         mlflow.log_figure(

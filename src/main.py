@@ -50,6 +50,7 @@ OPTIM = {
     "Adam": torch.optim.Adam,
     "SGD": torch.optim.SGD,
     "SGDm": lambda **kwargs: torch.optim.SGD(**kwargs, momentum=0.1),
+    "RMSprop": torch.optim.RMSprop,
 }
 
 

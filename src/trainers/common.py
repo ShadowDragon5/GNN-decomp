@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Literal, Type
 
 import torch
-from torch.optim import SGD, Adam
+from torch.optim import SGD, Adam, RMSprop
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -24,7 +24,7 @@ class Trainer(ABC):
         epochs: int,
         lr: float,
         wd: float,
-        optim: Type[Adam | SGD],
+        optim: Type[Adam | SGD | RMSprop],
         quiet: bool = False,
         need_acc: bool = False,
         **_,
