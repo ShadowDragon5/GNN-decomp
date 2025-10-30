@@ -515,10 +515,14 @@ class Preconditioned(Trainer):
             self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
-        # gammas = torch.ones(self.num_parts, requires_grad=True)
-        gammas = torch.zeros(
-            self.num_parts, requires_grad=True
-        )  # start with no contributions
+        gammas = torch.ones(self.num_parts, requires_grad=True)
+        # gammas = torch.zeros(
+        #     self.num_parts, requires_grad=True
+        # )  # start with no contributions
+
+        # gammas = torch.cat([torch.ones(1), torch.zeros(self.num_parts - 1)])
+        # gammas = gammas.requires_grad_()
+
         gamma_history = [gammas.detach().cpu().clone().numpy()]
         gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr)
 
@@ -654,15 +658,6 @@ class Preconditioned(Trainer):
             for idy in range(grid_n):
                 Z[idx, idy] = loss_fn(torch.tensor([X[idx], X[idy]])).detach().item()
 
-        # FIXME: average out the batched version
-        # # Compute Hessian
-        # gammas = torch.zeros(self.num_parts, requires_grad=True)
-        # H = torch.autograd.functional.hessian(loss_fn, gammas)  # type: ignore
-        # H = H.detach().cpu().numpy()  # type: ignore
-        # mlflow.log_table(
-        #     pd.DataFrame(H), artifact_file=f"hessian_{global_epoch:03}.json"
-        # )
-
         # Plot and log the loss landscape
         fig, ax = plt.subplots()
         im = ax.imshow(
@@ -670,7 +665,11 @@ class Preconditioned(Trainer):
             extent=(gamma_min, gamma_max, gamma_min, gamma_max),
             cmap="managua",
             norm=LogNorm(vmin=Z.min() + 1e-10, vmax=Z.max()),
+            origin="lower",
         )
+
+        ax.set_xlabel(r"$\gamma_0$")
+        ax.set_ylabel(r"$\gamma_1$")
         fig.colorbar(im, label="Loss")
 
         fig.tight_layout()
