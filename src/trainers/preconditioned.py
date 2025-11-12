@@ -504,14 +504,10 @@ class Preconditioned(Trainer):
         train_loss /= len(self.trainloader)
         return train_loss
 
-    # NOTE: Causes sharp deterioration in performance when stuck in local minimum (starting with ones)
-    # BUG: exploding gradient
     def optimize_gammas(self, contributions, global_epoch):
         """Does a mini optimization to find the best gamma combination"""
 
-        if self.num_parts == 2 and (
-            global_epoch in [1, 2, 3, 4] or global_epoch % 10 == 0
-        ):
+        if self.num_parts in [2, 3] and global_epoch in [0, 1, 2, 3, 4]:
             self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
@@ -524,7 +520,7 @@ class Preconditioned(Trainer):
         # gammas = gammas.requires_grad_()
 
         gamma_history = [gammas.detach().cpu().clone().numpy()]
-        gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr)
+        gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr / self.pre_epochs)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             gamma_optim,
@@ -653,32 +649,50 @@ class Preconditioned(Trainer):
             return total_loss / len(self.targetloader)
 
         X = np.linspace(gamma_min, gamma_max, grid_n)
-        Z = np.ndarray((grid_n, grid_n))
-        for idx in range(grid_n):
-            for idy in range(grid_n):
-                Z[idx, idy] = loss_fn(torch.tensor([X[idx], X[idy]])).detach().item()
 
-        # Plot and log the loss landscape
-        fig, ax = plt.subplots()
-        im = ax.imshow(
-            Z,
-            extent=(gamma_min, gamma_max, gamma_min, gamma_max),
-            cmap="managua",
-            norm=LogNorm(vmin=Z.min() + 1e-10, vmax=Z.max()),
-            origin="lower",
-        )
+        if self.num_parts == 2:
+            Z = np.ndarray((grid_n, grid_n))
+            for idx in range(grid_n):
+                for idy in range(grid_n):
+                    Z[idx, idy] = (
+                        loss_fn(torch.tensor([X[idx], X[idy]])).detach().item()
+                    )
 
-        ax.set_xlabel(r"$\gamma_0$")
-        ax.set_ylabel(r"$\gamma_1$")
-        fig.colorbar(im, label="Loss")
+        elif self.num_parts == 3:
+            Z = np.ndarray((grid_n, grid_n, grid_n))
+            for idx in range(grid_n):
+                for idy in range(grid_n):
+                    for idz in range(grid_n):
+                        Z[idx, idy, idz] = (
+                            loss_fn(torch.tensor([X[idx], X[idy], X[idz]]))
+                            .detach()
+                            .item()
+                        )
+        else:
+            return
 
-        fig.tight_layout()
-        mlflow.log_figure(
-            fig,
-            artifact_file=f"loss_landscape_{global_epoch:03}.pdf",
-        )
+        # # Plot and log the loss landscape
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(
+        #     Z,
+        #     extent=(gamma_min, gamma_max, gamma_min, gamma_max),
+        #     cmap="managua",
+        #     norm=LogNorm(vmin=Z.min() + 1e-10, vmax=Z.max()),
+        #     origin="lower",
+        # )
+        #
+        # ax.set_xlabel(r"$\gamma_0$")
+        # ax.set_ylabel(r"$\gamma_1$")
+        # fig.colorbar(im, label="Loss")
+        #
+        # fig.tight_layout()
+        # mlflow.log_figure(
+        #     fig,
+        #     artifact_file=f"loss_landscape_{global_epoch:03}.pdf",
+        # )
 
-        path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.csv"  # type: ignore
-        df = pd.DataFrame(Z, columns=X)
-        df.to_csv(path)
+        path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.npy"  # type: ignore
+        np.save(path, Z)
+        # df = pd.DataFrame(Z, columns=X)
+        # df.to_csv(path)
         mlflow.log_artifact(path)
