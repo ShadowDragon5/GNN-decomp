@@ -16,6 +16,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "torch",
+    "torch-cluster>=1.6.3",
     "torch-geometric",
     "tqdm",
 ]

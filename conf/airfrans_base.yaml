@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+  - model: GraphSAGE
+
+name: Baseline
+
+dataset: AirfRANS
+trainer: batched
+partitions: 1
+epochs: 400

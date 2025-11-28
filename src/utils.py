@@ -3,6 +3,8 @@ import re
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
+from torch_geometric.nn import radius_graph
+from torch_geometric.utils import to_scipy_sparse_matrix
 
 
 class PartitionedData(Data):
@@ -15,7 +17,7 @@ class PartitionedData(Data):
             return None
         return a.to(device)
 
-    def get_batch(self, i, device):
+    def get_batch(self, i: int, device: torch.device):
         # if (batch := getattr(self, f"batch_{i}", None)) is not None:
         if (batch := getattr(self, f"x_{i}_batch", None)) is not None:
             return batch.to(device)
@@ -32,7 +34,11 @@ class PartitionedData(Data):
 torch.serialization.add_safe_globals([PartitionedData])
 
 
-def get_data(data: Data | PartitionedData, i=None, device=None) -> dict:
+def get_data(
+    data: Data | PartitionedData,
+    i: int | None = None,
+    device: torch.device | None = None,
+) -> dict:
     """
     data: Data object from which the `keys` will be extracted into a dictionary
     i: (optional) partition index of the partitioned data
@@ -59,9 +65,22 @@ def position_transform(data: Data) -> Data:
     return Data(
         x=x,
         y=data.y,
+        pos=data.pos,
         edge_index=data.edge_index,
         batch=data.batch,
     )
+
+
+def connectivity_transform(data: Data, device: torch.device) -> Data:
+    """Populates the `edge_index` data for the graph"""
+    assert data.pos is not None
+    data.edge_index = radius_graph(
+        x=data.pos.to(device),
+        r=0.05,
+        loop=True,
+        max_num_neighbors=64,
+    ).cpu()
+    return data
 
 
 def part_to_data(x, y, A) -> Data:
@@ -75,12 +94,7 @@ def partition_transform_global(data: Data, num_parts: int = 2):
     assert data.x is not None
     assert data.edge_index is not None
 
-    N = data.x.shape[0]
-    A = torch.zeros((N, N), dtype=torch.float)  # adjacency matrix
-
-    # bidirectional adjacency matrix
-    A[data.edge_index[0], data.edge_index[1]] = 1
-    A[data.edge_index[1], data.edge_index[0]] = 1
+    A = to_scipy_sparse_matrix(data.edge_index, num_nodes=data.x.shape[0])
 
     labels = spectral_clustering(A, n_clusters=num_parts)
     subgraphs = dict()

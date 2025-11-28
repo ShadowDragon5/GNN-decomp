@@ -14,12 +14,13 @@ import torch
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from mlflow.pytorch import log_model
 from omegaconf import DictConfig
-from torch_geometric.data import Dataset
-from torch_geometric.datasets import GNNBenchmarkDataset
+from torch_geometric.data import Data, Dataset
+from torch_geometric.datasets import AirfRANS, GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
+from torch_geometric.utils import to_networkx
 
 from data import wave_data_2D_irrgular
-from models import GCN_CG, GCN_CN, MeshGraphNet
+from models import GCN_CG, GCN_CN, GraphSAGE, MeshGraphNet
 from trainers import (
     GAMMA_ALGO,
     Accumulating,
@@ -28,13 +29,14 @@ from trainers import (
     Preconditioned,
     Trainer,
 )
-from utils import partition_transform_global, position_transform
+from utils import connectivity_transform, partition_transform_global, position_transform
 
 MODELS = {
     "GCN_CG": GCN_CG,
     "GCN_CN": GCN_CN,  # Pattern
     # "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
     "MeshGraphNet": MeshGraphNet,
+    "GraphSAGE": GraphSAGE,
 }
 
 TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
@@ -65,21 +67,22 @@ class DS(StrEnum):
     CIFAR10 = auto()
     PATTERN = auto()
     Wave2D = auto()
+    AirfRANS = auto()
 
 
-def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dataset]:
+def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dataset]:
     """
     name: The name of the dataset
-        (one of `"PATTERN"`, `"MNIST"`, `"CIFAR10"`, `"Wave2D"`)
+    reload: A flag if a dataset should be downloaded anew
     """
 
+    root_str = str(root)
     match name:
         case DS.CIFAR10 | DS.MNIST | DS.PATTERN:
             preprocessing = None
             if name in [DS.CIFAR10, DS.MNIST]:
                 preprocessing = position_transform
 
-            root_str = str(root)
             trainset = GNNBenchmarkDataset(
                 root=root_str,
                 name=name,
@@ -127,6 +130,28 @@ def load_data(name: str, reload: bool, root: Path) -> tuple[Dataset, Dataset, Da
                 step_size=5,
                 train=False,
                 var=0,
+                force_reload=reload,
+            )
+
+            testset = validset
+
+        case DS.AirfRANS:
+            root_str = str(root / "AirfRANS")
+            # task = "full"
+            task = "scarce"
+            trainset = AirfRANS(
+                root=root_str,
+                task=task,
+                train=True,
+                pre_transform=position_transform,
+                force_reload=reload,
+            )
+
+            validset = AirfRANS(
+                root=root_str,
+                task=task,
+                train=False,
+                pre_transform=position_transform,
                 force_reload=reload,
             )
 
@@ -184,14 +209,28 @@ def main(cfg: DictConfig):
     has_pre = cfg.partitions > 1
     if has_pre:
         partset = None
+        root_str = str(dataset_dir / f"partitioned_{cfg.partitions}")
         match cfg.dataset:
             case DS.CIFAR10 | DS.MNIST | DS.PATTERN:
                 partset = GNNBenchmarkDataset(
-                    root=str(dataset_dir / f"partitioned_{cfg.partitions}"),
+                    root=root_str,
                     name=cfg.dataset,
                     split="train",
                     pre_transform=lambda data: partition_transform_global(
                         data if cfg.dataset == DS.PATTERN else position_transform(data),
+                        cfg.partitions,
+                    ),
+                    force_reload=cfg.u,
+                )
+            case DS.AirfRANS:
+                partset = AirfRANS(
+                    root=str(
+                        dataset_dir / f"partitioned_{cfg.partitions}" / "AirfRANS"
+                    ),
+                    task="full",
+                    train=True,
+                    pre_transform=lambda data: partition_transform_global(
+                        connectivity_transform(position_transform(data), device),
                         cfg.partitions,
                     ),
                     force_reload=cfg.u,
@@ -229,35 +268,32 @@ def main(cfg: DictConfig):
                 plt.figure()
 
                 for i in range(cfg.partitions):
-                    x = data.get_x(i, device)
-                    edge_index = data.get_edge_index(i, device)
+                    x = data.get("x", i, device)
+                    edge_index = data.get("edge_index", i, device)
 
                     N = x.shape[0]
-                    A = torch.zeros((N, N), dtype=torch.float)  # adjacency matrix
-
-                    # bidirectional adjacency matrix
-                    A[edge_index[0], edge_index[1]] = 1
-                    A[edge_index[1], edge_index[0]] = 1
-
-                    G = nx.from_numpy_array(A.numpy())
+                    G = to_networkx(
+                        Data(x=x, edge_index=edge_index), to_undirected=True
+                    )
                     pos = {
                         # node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
-                        node: data.get("coords", i, device)[node]  # Wave2D
+                        # node: data.get("coords", i, device)[node]  # Wave2D
+                        node: data.get("pos", i, device)[node]  # AirfRANS
                         for node in range(N)
                     }
 
-                    # rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
+                    rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
 
                     nx.draw(
                         G,
                         pos,
                         node_size=50,
-                        # node_color=rgb,
+                        node_color=rgb,
                         edge_color="gray",
                         with_labels=False,
                     )
 
-                plt.savefig(f"graphs/PDE/graph{d}.png", dpi=300)
+                plt.savefig(f"graphs/airfrans/graph{d}.png", dpi=300)
 
                 if d == 5:
                     break
