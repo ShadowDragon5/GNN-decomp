@@ -684,7 +684,7 @@ class Preconditioned(Trainer):
                 case WEIGHTING_STRATEGY.DIRECT:
                     return a + gammas[i] * b
                 case WEIGHTING_STRATEGY.CLIPPED:
-                    if l > 4:
+                    if l >= 4 * 2:  # weight + bias
                         return (a + gammas[i] * b).detach()
                     return a + gammas[i] * b
                 case WEIGHTING_STRATEGY.INVERSE:
