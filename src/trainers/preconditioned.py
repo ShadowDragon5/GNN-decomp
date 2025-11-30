@@ -581,7 +581,7 @@ class Preconditioned(Trainer):
                 (grad,) = torch.autograd.grad(loss, gammas)
                 gammas.grad = grad.detach()
                 gamma_optim.step()
-                gammas.clamp_(0)
+                gammas = torch.clamp(gammas, min=0)
 
                 gamma_history.append(gammas.detach().cpu().clone().numpy())
 
