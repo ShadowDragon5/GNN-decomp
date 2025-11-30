@@ -23,6 +23,7 @@ from data import wave_data_2D_irrgular
 from models import GCN_CG, GCN_CN, GraphSAGE, MeshGraphNet
 from trainers import (
     GAMMA_ALGO,
+    WEIGHTING_STRATEGY,
     Accumulating,
     Batched,
     MGN_trainer,
@@ -157,9 +158,6 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
 
             testset = validset
 
-        case _:
-            raise Exception(f"Unkown dataset {name}")
-
     return trainset, validset, testset
 
 
@@ -182,7 +180,7 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False
 
     trainset, validset, testset = load_data(
-        cfg.dataset,
+        DS(cfg.dataset),
         reload=cfg.u,
         root=dataset_dir,
     )
@@ -365,6 +363,7 @@ def main(cfg: DictConfig):
                     "additive": cfg.ASM,
                     "line search": cfg.gamma_algo,
                     "gamma opt. lr": cfg.gamma_lr,
+                    "gamma weighting": cfg.gamma_strat,
                     "partitions": cfg.partitions,
                     "optim target": cfg.target,
                     **trainer_params,
@@ -388,6 +387,7 @@ def main(cfg: DictConfig):
                 optim=OPTIM[cfg.optim],
                 ll_resolution=cfg.ll_resolution,
                 gamma_lr=cfg.gamma_lr,
+                gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
                 **trainer_params,
             )
             loss = trainer.run()

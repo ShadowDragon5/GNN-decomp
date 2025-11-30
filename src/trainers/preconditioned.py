@@ -2,12 +2,10 @@ from copy import deepcopy
 from enum import StrEnum, auto
 from typing import Any, Callable
 
-import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
 import pandas as pd
 import torch
-from matplotlib.colors import LogNorm
 from mlflow.pytorch import log_model
 from numpy import ceil
 from scipy.optimize import minimize_scalar
@@ -31,11 +29,24 @@ class GAMMA_ALGO(StrEnum):
     SGD = "SGD"
 
 
-def apply_to_models(a: dict, fun: Callable, b: dict | None = None):
+class WEIGHTING_STRATEGY(StrEnum):
+    """Gamma function used for combining weighting the contributions"""
+
+    DIRECT = auto()
+    CLIPPED = auto()
+    INVERSE = auto()
+
+
+def apply_to_models(a: dict, fun: Callable, b: dict | None = None, indexed=False):
     """Apply `fun` to `a` model state dictionary (inplace)"""
-    for key in a:
+    for l, key in enumerate(reversed(a)):  # L -> 1
         if a[key].data.dtype == torch.float:
-            a[key] = fun(a[key]) if b is None else fun(a[key], b[key])
+            if b is None:
+                a[key] = fun(a[key])
+            elif indexed:
+                a[key] = fun(a[key], b[key], l)
+            else:
+                a[key] = fun(a[key], b[key])
 
 
 def parameter_norm(params: dict) -> float:
@@ -68,6 +79,7 @@ class Preconditioned(Trainer):
         target: str = "train",
         ll_resolution: int = 20,
         gamma_lr: float = 0.01,
+        gamma_strat: WEIGHTING_STRATEGY = WEIGHTING_STRATEGY.DIRECT,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -82,6 +94,7 @@ class Preconditioned(Trainer):
         self.batched = batched
         self.ll_resolution = ll_resolution
         self.gamma_lr = gamma_lr
+        self.gamma_strat = gamma_strat
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -511,10 +524,10 @@ class Preconditioned(Trainer):
             self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
-        gammas = torch.ones(self.num_parts, requires_grad=True)
-        # gammas = torch.zeros(
-        #     self.num_parts, requires_grad=True
-        # )  # start with no contributions
+        # gammas = torch.ones(self.num_parts, requires_grad=True)
+        gammas = torch.zeros(
+            self.num_parts, requires_grad=True
+        )  # start with no contributions
 
         # gammas = torch.cat([torch.ones(1), torch.zeros(self.num_parts - 1)])
         # gammas = gammas.requires_grad_()
@@ -555,15 +568,9 @@ class Preconditioned(Trainer):
                 disable=self.quiet,
             ):
                 data.to(self.device)
-                # Gamma.T * Theta
                 # NOTE: rebuilding required for computational graph
                 theta = deepcopy(params)
-                for i, delta_w in enumerate(contributions):
-                    apply_to_models(
-                        theta,
-                        lambda a, b: a + gammas[i] * b,
-                        delta_w,
-                    )
+                theta = self.build_model(theta, gammas, contributions)
 
                 out, y = functional_call(
                     self.model, (theta, buffers), kwargs=get_data(data)
@@ -574,6 +581,7 @@ class Preconditioned(Trainer):
                 (grad,) = torch.autograd.grad(loss, gammas)
                 gammas.grad = grad.detach()
                 gamma_optim.step()
+                gammas.clamp_(0)
 
                 gamma_history.append(gammas.detach().cpu().clone().numpy())
 
@@ -608,7 +616,7 @@ class Preconditioned(Trainer):
         contributions,
         global_epoch,
         grid_n: int,
-        gamma_min: float = -0.5,
+        gamma_min: float = 0.0,
         gamma_max: float = 1.5,
     ):
         if grid_n <= 0:
@@ -625,12 +633,7 @@ class Preconditioned(Trainer):
 
         def loss_fn(gammas):
             theta = deepcopy(params)
-            for i, delta_w in enumerate(contributions):
-                apply_to_models(
-                    theta,
-                    lambda a, b: a + gammas[i] * b,
-                    delta_w,
-                )
+            theta = self.build_model(theta, gammas, contributions)
 
             total_loss = torch.tensor([0.0], device=self.device)
             for data in tqdm(
@@ -671,28 +674,30 @@ class Preconditioned(Trainer):
         else:
             return
 
-        # # Plot and log the loss landscape
-        # fig, ax = plt.subplots()
-        # im = ax.imshow(
-        #     Z,
-        #     extent=(gamma_min, gamma_max, gamma_min, gamma_max),
-        #     cmap="managua",
-        #     norm=LogNorm(vmin=Z.min() + 1e-10, vmax=Z.max()),
-        #     origin="lower",
-        # )
-        #
-        # ax.set_xlabel(r"$\gamma_0$")
-        # ax.set_ylabel(r"$\gamma_1$")
-        # fig.colorbar(im, label="Loss")
-        #
-        # fig.tight_layout()
-        # mlflow.log_figure(
-        #     fig,
-        #     artifact_file=f"loss_landscape_{global_epoch:03}.pdf",
-        # )
-
         path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.npy"  # type: ignore
         np.save(path, Z)
-        # df = pd.DataFrame(Z, columns=X)
-        # df.to_csv(path)
         mlflow.log_artifact(path)
+
+    def build_model(self, theta, gammas, contributions):
+        def weigthing_strategy(a, b, l, i):
+            match self.gamma_strat:
+                case WEIGHTING_STRATEGY.DIRECT:
+                    return a + gammas[i] * b
+                case WEIGHTING_STRATEGY.CLIPPED:
+                    if l > 4:
+                        return (a + gammas[i] * b).detach()
+                    return a + gammas[i] * b
+                case WEIGHTING_STRATEGY.INVERSE:
+                    base = 2
+                    # NOTE: gammas can not be negative
+                    return a + torch.pow(gammas[i], base**-l) * b
+
+        for i, delta_w in enumerate(contributions):
+            apply_to_models(
+                a=theta,
+                fun=lambda a, b, l: weigthing_strategy(a, b, l, i),
+                b=delta_w,
+                indexed=True,
+            )
+
+        return theta

@@ -18,6 +18,7 @@ gamma_algo: none
 optim: Adam
 ll_resolution: 0
 gamma_lr: 0.01
+gamma_strat: direct
 
 seed: 42
 epochs: 100
