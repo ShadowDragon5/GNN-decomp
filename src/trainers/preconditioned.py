@@ -272,14 +272,19 @@ class Preconditioned(Trainer):
 
             # LOGGING
             acc, vloss = self.validate(self.model)
-            mlflow.log_metrics(
-                {
-                    "before_pre/loss": vloss,
-                    **({"before_pre/acc": acc} if acc is not None else {}),
-                    "grad/global_L2": grad_norm,
-                },
-                step=epoch,
-            )
+            try:
+                mlflow.log_metrics(
+                    {
+                        "before_pre/loss": vloss,
+                        **({"before_pre/acc": acc} if acc is not None else {}),
+                        "grad/global_L2": grad_norm,
+                    },
+                    step=epoch,
+                )
+            except Exception:
+                print("vloss:", vloss)
+                print("acc:", acc)
+                print("grad_norm:", grad_norm)
 
             w0 = deepcopy(self.model.state_dict())
 
@@ -320,12 +325,8 @@ class Preconditioned(Trainer):
                         )
 
                     w_avg = deepcopy(self.model.state_dict())
-                    for delta_w, gamma in zip(contributions, gammas):
-                        apply_to_models(
-                            w_avg,
-                            lambda a, b: a + gamma * b,
-                            delta_w,
-                        )
+                    w_avg = self.build_model(w_avg, gammas, contributions)
+
                     self.model.load_state_dict(w_avg)
 
                 # NOTE: combines contributions one at a time
@@ -689,7 +690,7 @@ class Preconditioned(Trainer):
                 case WEIGHTING_STRATEGY.INVERSE:
                     base = 2
                     # NOTE: gammas must be positive (>0)
-                    return a + torch.pow(gammas[i], base**-l) * b
+                    return a + (gammas[i] ** (base**-l)) * b
 
         for i, delta_w in enumerate(contributions):
             apply_to_models(
