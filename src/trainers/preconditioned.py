@@ -524,10 +524,9 @@ class Preconditioned(Trainer):
             self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
+        EPS = 1e-8  # INVERSE derivative at 0 is inf
+        gammas = torch.full([self.num_parts], EPS, requires_grad=True)
         # gammas = torch.ones(self.num_parts, requires_grad=True)
-        gammas = torch.zeros(
-            self.num_parts, requires_grad=True
-        )  # start with no contributions
 
         # gammas = torch.cat([torch.ones(1), torch.zeros(self.num_parts - 1)])
         # gammas = gammas.requires_grad_()
@@ -581,7 +580,7 @@ class Preconditioned(Trainer):
                 (grad,) = torch.autograd.grad(loss, gammas)
                 gammas.grad = grad.detach()
                 gamma_optim.step()
-                gammas = torch.clamp(gammas, min=0)
+                gammas = torch.clamp(gammas, min=EPS)
 
                 gamma_history.append(gammas.detach().cpu().clone().numpy())
 
@@ -689,7 +688,7 @@ class Preconditioned(Trainer):
                     return a + gammas[i] * b
                 case WEIGHTING_STRATEGY.INVERSE:
                     base = 2
-                    # NOTE: gammas can not be negative
+                    # NOTE: gammas must be positive (>0)
                     return a + torch.pow(gammas[i], base**-l) * b
 
         for i, delta_w in enumerate(contributions):
