@@ -3,7 +3,7 @@ import re
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
-from torch_geometric.nn import radius_graph
+from torch_geometric.nn import graclus, radius_graph
 from torch_geometric.utils import to_scipy_sparse_matrix
 
 
@@ -71,16 +71,16 @@ def position_transform(data: Data) -> Data:
     )
 
 
-def connectivity_transform(data: Data, device: torch.device) -> Data:
-    """Populates the `edge_index` data for the graph"""
-    assert data.pos is not None
-    data.edge_index = radius_graph(
-        x=data.pos.to(device),
-        r=0.05,
-        loop=True,
-        max_num_neighbors=64,
-    ).cpu()
-    return data
+# def connectivity_transform(data: Data, device: torch.device) -> Data:
+#     """Populates the `edge_index` data for the graph"""
+#     assert data.pos is not None
+#     data.edge_index = radius_graph(
+#         x=data.pos.to(device),
+#         r=0.05,
+#         loop=True,
+#         max_num_neighbors=64,
+#     ).cpu()
+#     return data
 
 
 def part_to_data(x, y, A) -> Data:
@@ -114,5 +114,35 @@ def partition_transform_global(data: Data, num_parts: int = 2):
         subgraphs[f"unroll_v_gt_{i}"] = getattr(G, "unroll_v_gt", None)
         subgraphs[f"unroll_u_gt_{i}"] = getattr(G, "unroll_u_gt", None)
         subgraphs[f"a_gt_{i}"] = getattr(G, "a_gt", None)
+
+    return PartitionedData(batch=data.batch, **subgraphs)
+
+
+def partition_data_points(data: Data, num_parts: int = 2):
+    assert data.x is not None
+    assert data.pos is not None
+
+    N = data.pos.size(0)
+
+    edge_index = radius_graph(
+        x=data.pos,
+        r=0.05,
+        loop=True,
+        max_num_neighbors=64,
+    )
+
+    clusters = graclus(edge_index, num_nodes=N)
+
+    if num_parts == 2:
+        clusters = clusters % num_parts
+    else:
+        raise NotImplementedError()
+
+    subgraphs = dict()
+    for i in range(num_parts):
+        G = data.subgraph(clusters == i)
+        subgraphs[f"x_{i}"] = G.x
+        subgraphs[f"pos_{i}"] = G.pos
+        subgraphs[f"y_{i}"] = G.y
 
     return PartitionedData(batch=data.batch, **subgraphs)

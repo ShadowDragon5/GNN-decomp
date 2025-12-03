@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 from torch_geometric.data import Data, Dataset
 from torch_geometric.datasets import AirfRANS, GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
+from torch_geometric.nn import radius_graph
 from torch_geometric.utils import to_networkx
 
 from data import wave_data_2D_irrgular
@@ -30,7 +31,11 @@ from trainers import (
     Preconditioned,
     Trainer,
 )
-from utils import connectivity_transform, partition_transform_global, position_transform
+from utils import (
+    partition_data_points,
+    partition_transform_global,
+    position_transform,
+)
 
 MODELS = {
     "GCN_CG": GCN_CG,
@@ -227,8 +232,8 @@ def main(cfg: DictConfig):
                     ),
                     task="full",
                     train=True,
-                    pre_transform=lambda data: partition_transform_global(
-                        connectivity_transform(position_transform(data), device),
+                    pre_transform=lambda data: partition_data_points(
+                        position_transform(data),
                         cfg.partitions,
                     ),
                     force_reload=cfg.u,
@@ -267,11 +272,19 @@ def main(cfg: DictConfig):
 
                 for i in range(cfg.partitions):
                     x = data.get("x", i, device)
-                    edge_index = data.get("edge_index", i, device)
+                    # edge_index = data.get("edge_index", i, device)
+
+                    edge_index = radius_graph(
+                        x=data.get("pos", i, device),
+                        r=0.05,
+                        loop=True,
+                        max_num_neighbors=64,
+                    )
 
                     N = x.shape[0]
                     G = to_networkx(
-                        Data(x=x, edge_index=edge_index), to_undirected=True
+                        Data(x=x, edge_index=edge_index),
+                        to_undirected=True,
                     )
                     pos = {
                         # node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
@@ -280,18 +293,18 @@ def main(cfg: DictConfig):
                         for node in range(N)
                     }
 
-                    rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
+                    # rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
 
                     nx.draw(
                         G,
                         pos,
                         node_size=50,
-                        node_color=rgb,
+                        # node_color=rgb,
                         edge_color="gray",
                         with_labels=False,
                     )
 
-                plt.savefig(f"graphs/airfrans/graph{d}.png", dpi=300)
+                plt.savefig(f"graphs/airfrans/graph{d}.pdf", dpi=300)
 
                 if d == 5:
                     break

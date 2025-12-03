@@ -9,7 +9,6 @@ dependencies = [
     "hyperopt",
     "matplotlib",
     "mlflow<3",
-    "mlflow-skinny",
     "networkx",
     "numpy",
     "pandas",
@@ -19,4 +18,9 @@ dependencies = [
     "torch-cluster>=1.6.3",
     "torch-geometric",
     "tqdm",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
