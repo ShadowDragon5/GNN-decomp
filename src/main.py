@@ -244,7 +244,7 @@ def main(cfg: DictConfig):
                     root=str(
                         dataset_dir / f"partitioned_{cfg.partitions}" / "AirfRANS"
                     ),
-                    task="full",
+                    task="scarce",
                     train=True,
                     pre_transform=lambda data: partition_data_points(
                         position_transform(data),
