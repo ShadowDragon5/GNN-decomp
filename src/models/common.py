@@ -49,5 +49,5 @@ class GNN(nn.Module, ABC):
         self.device = device
 
     @abstractmethod
-    def loss(self, pred, label) -> torch.Tensor:
+    def loss(self, pred, label) -> dict[str, torch.Tensor]:
         pass

@@ -8,7 +8,7 @@ from torch_geometric.utils import to_scipy_sparse_matrix
 
 
 class PartitionedData(Data):
-    def get(self, attr: str, i: int, device):
+    def get(self, attr: str, i: int, device) -> torch.Tensor | None:
         if attr == "batch":
             return self.get_batch(i, device)
 
@@ -17,7 +17,7 @@ class PartitionedData(Data):
             return None
         return a.to(device)
 
-    def get_batch(self, i: int, device: torch.device):
+    def get_batch(self, i: int, device: torch.device) -> torch.Tensor | None:
         # if (batch := getattr(self, f"batch_{i}", None)) is not None:
         if (batch := getattr(self, f"x_{i}_batch", None)) is not None:
             return batch.to(device)
@@ -54,9 +54,38 @@ def get_data(
         "v_gt",
         "gt",
     ]
-    if i is None:
-        return {k: getattr(data, k, None) for k in keys}
-    return {k: data.get(k, i, device) for k in keys}
+
+    def wrapped_get(k: str) -> torch.Tensor | None:
+        if i is None:
+            return getattr(data, k, None)
+        return data.get(k, i, device)
+
+    if wrapped_get("edge_index") is not None:
+        return {k: wrapped_get(k) for k in keys}
+
+    # Sample and add `edge_index` to `AirfRANS` data
+    pos = wrapped_get("pos")
+    assert pos is not None
+
+    # sample points
+    n = pos.size(0)
+    sampleN = 32000
+    idx = torch.multinomial(torch.ones(n, device=device), sampleN)
+
+    edge_index = radius_graph(
+        x=pos[idx],
+        r=0.05,
+        loop=True,
+        max_num_neighbors=64,
+    )
+
+    return {
+        "edge_index": edge_index,
+        **{
+            k: wrapped_get(k)[idx]  # type: ignore
+            for k in ["x", "y"]
+        },
+    }
 
 
 def position_transform(data: Data) -> Data:

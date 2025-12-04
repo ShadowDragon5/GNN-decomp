@@ -63,15 +63,23 @@ class GraphSAGE(GNN):
         # MLP decoder
         self.decoder = MLP([8, 64, 64, 4])
 
-    def forward(self, x, edge_index):
+    def forward(self, x, y, edge_index):
         z = self.encoder(x)
 
         z = self.conv(z, edge_index)
 
         z = self.decoder(z)
 
-        return z
+        return z, y
 
-    def loss(self, pred, label) -> torch.Tensor:
+    def loss(self, pred, label) -> dict[str, torch.Tensor]:
         loss_criterion = nn.MSELoss(reduction="none")
-        return loss_criterion(pred, label).mean()
+        loss_per_var = loss_criterion(pred, label).mean(dim=0)
+        total_loss = loss_per_var.mean()
+        return {
+            "loss": total_loss,
+            "u_x": loss_per_var[0],
+            "u_y": loss_per_var[1],
+            "p": loss_per_var[2],
+            "v_t": loss_per_var[3],
+        }

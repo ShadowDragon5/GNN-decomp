@@ -53,6 +53,20 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "mgn-batched": MGN_trainer,  # MGN baseline
 }
 
+SCHEDULERS = {
+    "GCN_CG": lambda optim, **_: torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optim,
+        mode="min",
+        factor=0.5,
+        patience=5,
+    ),
+    "GraphSAGE": lambda optim, lr, total_steps: torch.optim.lr_scheduler.OneCycleLR(
+        optim,
+        max_lr=lr,
+        total_steps=total_steps,
+    ),
+}
+
 # Gamma optimizer
 OPTIM = {
     "Adam": torch.optim.Adam,
@@ -261,7 +275,6 @@ def main(cfg: DictConfig):
             shuffle=True,
             # NOTE: results in x_0_batch
             follow_batch=[f"x_{i}" for i in range(cfg.partitions)],
-            # pin_memory=True,
             num_workers=cfg.dev.num_workers,
         )
 
@@ -401,6 +414,7 @@ def main(cfg: DictConfig):
                 ll_resolution=cfg.ll_resolution,
                 gamma_lr=cfg.gamma_lr,
                 gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
+                scheduler=SCHEDULERS[cfg.model.base],
                 **trainer_params,
             )
             loss = trainer.run()

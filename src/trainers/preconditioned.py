@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 from enum import StrEnum, auto
 from typing import Any, Callable
@@ -124,12 +125,11 @@ class Preconditioned(Trainer):
         )
         pre_optimizer.load_state_dict(optim_state)
 
-        pre_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            pre_optimizer,
-            mode="min",
-            factor=0.5,
-            patience=5,
-        )
+        if self.batched:
+            nsteps = len(self.part_trainloader) * self.pre_epochs
+        else:
+            nsteps = self.pre_epochs
+        pre_scheduler = self.scheduler(pre_optimizer, lr, nsteps)
 
         pre_optimizer.zero_grad()
         for pre_epoch in range(self.pre_epochs):
@@ -143,7 +143,7 @@ class Preconditioned(Trainer):
                 disable=self.quiet,
             ):
                 out, y = model(**get_data(data, i, self.device))
-                loss = model.loss(out, y)
+                loss = model.loss(out, y)["loss"]
 
                 pre_train_loss += loss.detach().item()
 
@@ -153,14 +153,19 @@ class Preconditioned(Trainer):
                 loss.backward()
                 if self.batched:
                     pre_optimizer.step()
+                    if isinstance(pre_scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                        pre_scheduler.step()
                     pre_optimizer.zero_grad()
 
             if not self.batched:
                 pre_optimizer.step()
+                if isinstance(pre_scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    pre_scheduler.step()
                 pre_optimizer.zero_grad()
 
-            pre_train_loss /= len(self.part_trainloader)
-            pre_scheduler.step(pre_train_loss)
+            if isinstance(pre_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                pre_train_loss /= len(self.part_trainloader)
+                pre_scheduler.step(pre_train_loss)  # type: ignore
 
             # if pre_epoch % 19 == 0:
             #     acc, vloss = self.validate(model)  # model.eval
@@ -209,7 +214,7 @@ class Preconditioned(Trainer):
         model = deepcopy(model).to(self.device)
 
         # HACK
-        def objective(gamma: float):
+        def objective(gamma: float) -> float:
             w_new = deepcopy(weights)
             apply_to_models(
                 w_new,
@@ -217,7 +222,7 @@ class Preconditioned(Trainer):
                 contribution,
             )
             model.load_state_dict(w_new)
-            _, loss = self.validate(model, self.targetloader)
+            loss = self.validate(model, self.targetloader)["loss"]
             return loss
 
         gamma = 1.0
@@ -235,7 +240,7 @@ class Preconditioned(Trainer):
 
             case GAMMA_ALGO.BACKTRACKING:
                 beta = 0.5
-                _, fx = self.validate(model, self.targetloader)
+                fx = self.validate(model, self.targetloader)["loss"]
                 for _ in range(10):
                     if objective(gamma) < fx:
                         break
@@ -255,35 +260,32 @@ class Preconditioned(Trainer):
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=0.5,
-            patience=5,
-        )
+        if self.batched:
+            nsteps = len(self.trainloader) * self.epochs
+        else:
+            nsteps = self.epochs
+        scheduler = self.scheduler(optimizer, self.lr, nsteps)
 
         self.model.to(self.device)
 
-        valid_loss = 0
+        valid_loss = defaultdict(float)
         scaled_epochs = 0
         for epoch in range(self.epochs):
             grad_train = self.get_global_grad(epoch, self.trainloader)
             grad_norm = parameter_norm(grad_train)
 
             # LOGGING
-            acc, vloss = self.validate(self.model)
+            vloss = self.validate(self.model)
             try:
                 mlflow.log_metrics(
                     {
-                        "before_pre/loss": vloss,
-                        **({"before_pre/acc": acc} if acc is not None else {}),
+                        **{f"before_pre/{k}": v for k, v in vloss.items()},
                         "grad/global_L2": grad_norm,
                     },
                     step=epoch,
                 )
             except Exception:
                 print("vloss:", vloss)
-                print("acc:", acc)
                 print("grad_norm:", grad_norm)
 
             w0 = deepcopy(self.model.state_dict())
@@ -403,19 +405,16 @@ class Preconditioned(Trainer):
             )
 
             # LOGGING
-            acc, vloss = self.validate(self.model)  # model.eval()
+            vloss = self.validate(self.model)  # model.eval()
             mlflow.log_metrics(
-                {
-                    "after_pre/loss": vloss,
-                    **({"after_pre/acc": acc} if acc is not None else {}),
-                },
+                {f"after_pre/{k}": v for k, v in vloss.items()},
                 step=epoch,
             )
 
             # Full pass
             train_loss = 0
             for _ in range(self.full_epochs):
-                train_loss = self.train(optimizer, epoch)  # model.train()
+                train_loss = self.train(optimizer, scheduler, epoch)  # model.train()
                 mlflow.log_metrics(
                     {
                         "train/scaled_loss": train_loss,
@@ -425,41 +424,39 @@ class Preconditioned(Trainer):
                 scaled_epochs += 1
 
             # Validation
-            acc, valid_loss = self.validate(self.model)
+            valid_loss = self.validate(self.model)
 
-            scheduler.step(valid_loss)
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(valid_loss["loss"])
 
             if not self.quiet:
-                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss}")
+                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
 
             mlflow.log_metrics(
                 {
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
-                    "validate/loss": valid_loss,
-                    **({"validate/accuracy": acc} if acc is not None else {}),
+                    **{f"validate/{k}": v for k, v in valid_loss.items()},
                 },
                 step=epoch,
             )
 
             mlflow.log_metrics(
-                {
-                    "validate/scaled_loss": valid_loss,
-                    **({"validate/scaled_accuracy": acc} if acc is not None else {}),
-                },
+                {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
                 step=scaled_epochs - 1,
             )
 
             if epoch % 10 == 9:
                 log_model(self.model, "model")
 
-        accuracy = self.test()
-        if not self.quiet:
-            print(f"Accuracy: {accuracy}")
+        if self.need_acc:
+            accuracy = self.test()
+            if not self.quiet:
+                print(f"Accuracy: {accuracy}")
 
-        mlflow.log_metric("test/accuracy", accuracy)
+            mlflow.log_metric("test/accuracy", accuracy)
 
-        return valid_loss
+        return valid_loss["loss"]
 
     def get_global_grad(self, epoch, dataloader) -> dict[str, torch.Tensor]:
         """Computes a global gradient"""
@@ -475,7 +472,7 @@ class Preconditioned(Trainer):
             data.to(self.device)
 
             out, y = self.model(**get_data(data))
-            loss = self.model.loss(out, y)
+            loss = self.model.loss(out, y)["loss"]
 
             loss.backward()
 
@@ -485,7 +482,7 @@ class Preconditioned(Trainer):
             if param.grad is not None
         }
 
-    def train(self, optimizer, epoch):
+    def train(self, optimizer, scheduler, epoch):
         """Global training step"""
         train_loss = 0
         self.model.train()
@@ -500,7 +497,7 @@ class Preconditioned(Trainer):
             data.to(self.device)
 
             out, y = self.model(**get_data(data))
-            loss = self.model.loss(out, y)
+            loss = self.model.loss(out, y)["loss"]
 
             train_loss += loss.detach().item()
 
@@ -510,10 +507,14 @@ class Preconditioned(Trainer):
             loss.backward()
             if self.batched:
                 optimizer.step()
+                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    scheduler.step()
                 optimizer.zero_grad()
 
         if not self.batched:
             optimizer.step()
+            if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                scheduler.step()
 
         train_loss /= len(self.trainloader)
         return train_loss
@@ -525,7 +526,7 @@ class Preconditioned(Trainer):
             self.loss_landscape(contributions, global_epoch, grid_n=self.ll_resolution)
 
         N_EPOCHS = 1000
-        EPS = 1e-8  # INVERSE derivative at 0 is inf
+        EPS = 1e-8  # to prevent INVERSE inf derivative at 0
         gammas = torch.full([self.num_parts], EPS, requires_grad=True)
         # gammas = torch.ones(self.num_parts, requires_grad=True)
 
@@ -562,7 +563,7 @@ class Preconditioned(Trainer):
 
             for data in tqdm(
                 self.targetloader,
-                desc=f"Eval {epoch}",
+                desc=f"Gamma optim. {epoch}",
                 dynamic_ncols=True,
                 leave=False,
                 disable=self.quiet,
@@ -575,7 +576,7 @@ class Preconditioned(Trainer):
                 out, y = functional_call(
                     self.model, (theta, buffers), kwargs=get_data(data)
                 )
-                loss = self.model.loss(out, y)
+                loss = self.model.loss(out, y)["loss"]
                 valid_loss += loss.detach().item()
 
                 (grad,) = torch.autograd.grad(loss, gammas)
@@ -647,7 +648,7 @@ class Preconditioned(Trainer):
                 out, y = functional_call(
                     self.model, (theta, buffers), kwargs=get_data(data)
                 )
-                loss = self.model.loss(out, y)
+                loss = self.model.loss(out, y)["loss"]
                 total_loss += loss
             return total_loss / len(self.targetloader)
 

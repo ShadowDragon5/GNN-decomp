@@ -9,3 +9,6 @@ dataset: AirfRANS
 trainer: batched
 partitions: 1
 epochs: 400
+
+dev:
+  batch: 1

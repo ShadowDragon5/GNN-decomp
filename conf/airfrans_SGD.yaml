@@ -1,0 +1,12 @@
+defaults:
+  - airfrans_base
+  - _self_
+
+name: P
+
+trainer: pre-batched
+partitions: 2
+
+ASM: true
+gamma_algo: SGD
+gamma_strat: inverse

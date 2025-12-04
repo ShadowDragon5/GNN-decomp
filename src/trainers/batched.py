@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import mlflow
 import torch
 from tqdm import tqdm
@@ -9,7 +11,6 @@ from .common import Trainer
 
 class Batched(Trainer):
     """
-    Re-implementation from (Dwivedi et al., 2022).
     Mini batches of full graphs.
     """
 
@@ -18,16 +19,13 @@ class Batched(Trainer):
             self.model.parameters(), lr=self.lr, weight_decay=self.wd
         )
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=0.5,
-            patience=5,
+        scheduler = self.scheduler(
+            optimizer, self.lr, len(self.trainloader) * self.epochs
         )
 
         self.model.to(self.device)
 
-        valid_loss = 0
+        valid_loss = defaultdict(float)
         for epoch in range(self.epochs):
             train_loss = 0
             self.model.train()
@@ -41,37 +39,40 @@ class Batched(Trainer):
                 data.to(self.device)
 
                 out, y = self.model(**get_data(data))
-                loss = self.model.loss(out, y)
+                loss = self.model.loss(out, y)["loss"]
 
                 train_loss += loss.detach().item()
 
                 loss.backward()
                 optimizer.step()
+                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    scheduler.step()
                 optimizer.zero_grad()
 
             train_loss /= len(self.trainloader)
 
             # Validation
-            accuracy, valid_loss = self.validate(self.model)
-            scheduler.step(valid_loss)
+            valid_loss = self.validate(self.model)
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(valid_loss["loss"])
 
             if not self.quiet:
-                print(f"{self.name} Epoch: {epoch:03} | Valid Loss: {valid_loss}")
+                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
 
             mlflow.log_metrics(
                 {
                     "train/loss": train_loss,
                     "train/lr": scheduler.get_last_lr()[0],
-                    "validate/loss": valid_loss,
-                    **({"validate/accuracy": accuracy} if accuracy is not None else {}),
+                    **{f"validate/{k}": v for k, v in valid_loss.items()},
                 },
                 step=epoch,
             )
 
-        accuracy = self.test()
-        if not self.quiet:
-            print(f"Accuracy: {accuracy}")
+        if self.need_acc:
+            accuracy = self.test()
+            if not self.quiet:
+                print(f"Accuracy: {accuracy}")
 
-        mlflow.log_metric("test/accuracy", accuracy)
+            mlflow.log_metric("test/accuracy", accuracy)
 
-        return valid_loss
+        return valid_loss["loss"]

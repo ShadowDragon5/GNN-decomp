@@ -47,7 +47,7 @@ class GCN_CN(GNN):
         h = self.MLP_layer(h)
         return h
 
-    def loss(self, pred, label) -> torch.Tensor:
+    def loss(self, pred, label) -> dict[str, torch.Tensor]:
         # weighted cross entropy for unbalanced classes
         V = label.size(0)
         label_count = torch.bincount(label)
@@ -58,4 +58,4 @@ class GCN_CN(GNN):
         weight *= (cluster_sizes > 0).float()
 
         criterion = nn.CrossEntropyLoss(weight=weight)
-        return criterion(pred, label)
+        return {"loss": criterion(pred, label)}

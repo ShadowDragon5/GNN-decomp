@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Literal, Type
+from collections import defaultdict
+from typing import Callable, Literal, Type
 
 import torch
 from torch.optim import SGD, Adam, RMSprop
@@ -20,6 +21,10 @@ class Trainer(ABC):
         trainloader: DataLoader,
         validloader: DataLoader,
         testloader: DataLoader,
+        scheduler: Callable[
+            [torch.optim.Optimizer, float, int],
+            torch.optim.lr_scheduler.OneCycleLR,
+        ],
         device: torch.device,
         epochs: int,
         lr: float,
@@ -41,21 +46,22 @@ class Trainer(ABC):
         self.quiet = quiet
         self.need_acc = need_acc
         self.optim = optim
+        self.scheduler = scheduler
 
     @abstractmethod
     def run(self) -> float:
         """Main training loop"""
         pass
 
-    # TODO: change return to dict[str, float] for more dynamic measurement
-    def validate(self, model, dataloader=None):
+    def validate(self, model: GNN, dataloader=None) -> dict[str, float]:
         """
         Validates the model w.r.t. given dataloader (uses validation set by default)
-        returns: (accuracy, loss)
+        returns: dict with metrics
         """
         if dataloader is None:
             dataloader = self.validloader
-        valid_loss = 0
+
+        valid_losses = defaultdict(float)
         correct = 0
         total = 0
         model.eval()
@@ -70,12 +76,10 @@ class Trainer(ABC):
                 data.to(self.device)
 
                 out, y = model(**get_data(data))
-                loss = model.loss(out, y)
-                valid_loss += loss.detach().item()
-                if loss.detach().item() == torch.nan:
-                    print("NaN loss")
-                    print(out.detach())
-                    print(y.detach())
+                losses = model.loss(out, y)
+                for key in losses:
+                    item = losses[key].detach().item()
+                    valid_losses[key] += item
 
                 # Validation accuracy
                 if self.need_acc:
@@ -83,11 +87,14 @@ class Trainer(ABC):
                     correct += (pred == y).sum().item()
                     total += y.size(0)
 
-        valid_loss /= len(self.validloader)
+        for key in valid_losses:
+            valid_losses[key] /= len(self.validloader)
         acc = None
         if self.need_acc:
             acc = correct / total
-        return acc, valid_loss
+            return {**valid_losses, "acc": acc}
+
+        return valid_losses
 
     def test(self) -> float:
         self.model.eval()

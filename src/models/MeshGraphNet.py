@@ -120,14 +120,14 @@ class MeshGraphNet(GNN):
 
         return x, v_gt
 
-    def loss(self, pred, label) -> torch.Tensor:
+    def loss(self, pred, label) -> dict[str, torch.Tensor]:
         """MSE
         pred = x
         label = v_gt
         """
         gnn_prdiction = pred[:, :]
         gt = label[:, :].to(self.device)
-        return ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()
+        return {"loss": ((gnn_prdiction[:, 0] - gt[:, 0]) ** 2).mean()}
 
 
 class Processor(MessagePassing):

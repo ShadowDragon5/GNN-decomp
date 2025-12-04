@@ -40,9 +40,9 @@ class GCN_CG(GNN):
         h = self.MLP_layer(h)
         return h, y
 
-    def loss(self, pred, label) -> torch.Tensor:
+    def loss(self, pred, label) -> dict[str, torch.Tensor]:
         criterion = nn.CrossEntropyLoss()
-        return criterion(pred, label)
+        return {"loss": criterion(pred, label)}
 
 
 if __name__ == "__main__":
