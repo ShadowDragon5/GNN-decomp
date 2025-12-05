@@ -17,7 +17,6 @@ from omegaconf import DictConfig
 from torch_geometric.data import Data, Dataset
 from torch_geometric.datasets import AirfRANS, GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import radius_graph
 from torch_geometric.utils import to_networkx
 
 from data import wave_data_2D_irrgular
@@ -32,6 +31,8 @@ from trainers import (
     Trainer,
 )
 from utils import (
+    get_data,
+    normalization_transform,
     partition_data_points,
     partition_transform_global,
     position_transform,
@@ -88,6 +89,13 @@ class DS(StrEnum):
     PATTERN = auto()
     Wave2D = auto()
     AirfRANS = auto()
+
+
+# Normalization variables
+mean_x = 0
+std_x = 0
+mean_y = 0
+std_y = 0
 
 
 def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dataset]:
@@ -163,7 +171,33 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
                 root=root_str,
                 task=task,
                 train=True,
-                pre_transform=position_transform,
+                force_reload=reload,
+            )
+
+            global mean_x, mean_y, std_x, std_y
+            items = 0
+            for data in trainset:
+                items += data.x.shape[0]
+                mean_x += (data.x.sum(axis=0) - data.x.shape[0] * mean_x) / items
+                mean_y += (data.y.sum(axis=0) - data.y.shape[0] * mean_y) / items
+
+            items = 0
+            for data in trainset:
+                n = data.x.shape[0]
+                items += n
+                std_x += (((data.x - mean_x) ** 2).sum(axis=0) - n * std_x) / items
+                std_y += (((data.y - mean_y) ** 2).sum(axis=0) - n * std_y) / items
+
+            std_x = torch.sqrt(std_x)  # type: ignore
+            std_y = torch.sqrt(std_y)  # type: ignore
+
+            trainset = AirfRANS(
+                root=root_str,
+                task=task,
+                train=True,
+                pre_transform=lambda data: position_transform(
+                    normalization_transform(data, mean_x, std_x, mean_y, std_y)
+                ),
                 force_reload=reload,
             )
 
@@ -171,7 +205,9 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
                 root=root_str,
                 task=task,
                 train=False,
-                pre_transform=position_transform,
+                pre_transform=lambda data: position_transform(
+                    normalization_transform(data, mean_x, std_x, mean_y, std_y)
+                ),
                 force_reload=reload,
             )
 
@@ -247,11 +283,14 @@ def main(cfg: DictConfig):
                     task="scarce",
                     train=True,
                     pre_transform=lambda data: partition_data_points(
-                        position_transform(data),
+                        position_transform(
+                            normalization_transform(data, mean_x, std_x, mean_y, std_y)
+                        ),
                         cfg.partitions,
                     ),
                     force_reload=cfg.u,
                 )
+
             case DS.Wave2D:
                 partset = wave_data_2D_irrgular(
                     edge_features=["dist", "direction"],
@@ -284,15 +323,20 @@ def main(cfg: DictConfig):
                 plt.figure()
 
                 for i in range(cfg.partitions):
-                    x = data.get("x", i, device)
-                    # edge_index = data.get("edge_index", i, device)
+                    # x = data.get("x", i, device)
+                    # # edge_index = data.get("edge_index", i, device)
+                    #
+                    # edge_index = radius_graph(
+                    #     x=data.get("pos", i, device),
+                    #     r=0.05,
+                    #     loop=True,
+                    #     max_num_neighbors=64,
+                    # )
 
-                    edge_index = radius_graph(
-                        x=data.get("pos", i, device),
-                        r=0.05,
-                        loop=True,
-                        max_num_neighbors=64,
-                    )
+                    sample_data = get_data(data, i, device)
+                    x = sample_data["x"]
+                    edge_index = sample_data["edge_index"]
+                    pos = sample_data["pos"]
 
                     N = x.shape[0]
                     G = to_networkx(
@@ -302,7 +346,8 @@ def main(cfg: DictConfig):
                     pos = {
                         # node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
                         # node: data.get("coords", i, device)[node]  # Wave2D
-                        node: data.get("pos", i, device)[node]  # AirfRANS
+                        # node: data.get("pos", i, device)[node]  # AirfRANS
+                        node: pos[node]
                         for node in range(N)
                     }
 
@@ -311,13 +356,13 @@ def main(cfg: DictConfig):
                     nx.draw(
                         G,
                         pos,
-                        node_size=50,
-                        # node_color=rgb,
+                        node_size=1,
+                        node_color=["steelblue", "crimson"][i],
                         edge_color="gray",
                         with_labels=False,
                     )
 
-                plt.savefig(f"graphs/airfrans/graph{d}.pdf", dpi=300)
+                plt.savefig(f"graphs/airfrans/graph{d}.png", dpi=300)
 
                 if d == 5:
                     break

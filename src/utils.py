@@ -17,6 +17,9 @@ class PartitionedData(Data):
             return None
         return a.to(device)
 
+    def set(self, attr: str, i: int, value) -> None:
+        setattr(self, f"{attr}_{i}", value)
+
     def get_batch(self, i: int, device: torch.device) -> torch.Tensor | None:
         # if (batch := getattr(self, f"batch_{i}", None)) is not None:
         if (batch := getattr(self, f"x_{i}_batch", None)) is not None:
@@ -100,16 +103,19 @@ def position_transform(data: Data) -> Data:
     )
 
 
-# def connectivity_transform(data: Data, device: torch.device) -> Data:
-#     """Populates the `edge_index` data for the graph"""
-#     assert data.pos is not None
-#     data.edge_index = radius_graph(
-#         x=data.pos.to(device),
-#         r=0.05,
-#         loop=True,
-#         max_num_neighbors=64,
-#     ).cpu()
-#     return data
+def normalization_transform(data: Data, mean_x, std_x, mean_y, std_y) -> Data:
+    x = data.x
+    y = data.y
+    x = (x - mean_x) / (std_x + 1e-8)
+    y = (y - mean_y) / (std_y + 1e-8)
+
+    return Data(
+        x=x,
+        y=y,
+        pos=data.pos,
+        edge_index=data.edge_index,
+        batch=data.batch,
+    )
 
 
 def part_to_data(x, y, A) -> Data:

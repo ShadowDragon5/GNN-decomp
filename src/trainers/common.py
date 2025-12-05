@@ -88,7 +88,7 @@ class Trainer(ABC):
                     total += y.size(0)
 
         for key in valid_losses:
-            valid_losses[key] /= len(self.validloader)
+            valid_losses[key] /= len(dataloader)
         acc = None
         if self.need_acc:
             acc = correct / total
