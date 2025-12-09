@@ -92,7 +92,7 @@ class Trainer(ABC):
         acc = None
         if self.need_acc:
             acc = correct / total
-            return {**valid_losses, "acc": acc}
+            valid_losses = valid_losses | {"acc": acc}
 
         return valid_losses
 

@@ -278,10 +278,8 @@ class Preconditioned(Trainer):
             vloss = self.validate(self.model)
             try:
                 mlflow.log_metrics(
-                    {
-                        **{f"before_pre/{k}": v for k, v in vloss.items()},
-                        "grad/global_L2": grad_norm,
-                    },
+                    {f"before_pre/{k}": v for k, v in vloss.items()}
+                    | {"grad/global_L2": grad_norm},
                     step=epoch,
                 )
             except Exception:
@@ -433,11 +431,8 @@ class Preconditioned(Trainer):
                 print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
 
             mlflow.log_metrics(
-                {
-                    "train/loss": train_loss,
-                    "train/lr": scheduler.get_last_lr()[0],
-                    **{f"validate/{k}": v for k, v in valid_loss.items()},
-                },
+                {"train/loss": train_loss, "train/lr": scheduler.get_last_lr()[0]}
+                | {f"validate/{k}": v for k, v in valid_loss.items()},
                 step=epoch,
             )
 
