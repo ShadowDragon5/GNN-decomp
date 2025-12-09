@@ -23,7 +23,7 @@ class Trainer(ABC):
         testloader: DataLoader,
         scheduler: Callable[
             [torch.optim.Optimizer, float, int],
-            torch.optim.lr_scheduler.OneCycleLR,
+            torch.optim.lr_scheduler.LRScheduler,
         ],
         device: torch.device,
         epochs: int,

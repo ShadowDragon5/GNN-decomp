@@ -55,7 +55,7 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
 }
 
 SCHEDULERS = {
-    "GCN_CG": lambda optim, **_: torch.optim.lr_scheduler.ReduceLROnPlateau(
+    "GCN_CG": lambda optim, *_: torch.optim.lr_scheduler.ReduceLROnPlateau(
         optim,
         mode="min",
         factor=0.5,
