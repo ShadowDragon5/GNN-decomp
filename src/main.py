@@ -164,8 +164,7 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
             testset = validset
 
         case DS.AirfRANS:
-            root_str = str(root / "AirfRANS")
-            # task = "full"
+            root_str = str(root / "AirfRANSraw")
             task = "scarce"
             trainset = AirfRANS(
                 root=root_str,
@@ -190,6 +189,8 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
 
             std_x = torch.sqrt(std_x)  # type: ignore
             std_y = torch.sqrt(std_y)  # type: ignore
+
+            root_str = str(root / "AirfRANS")
 
             trainset = AirfRANS(
                 root=root_str,

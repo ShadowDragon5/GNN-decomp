@@ -165,13 +165,27 @@ def partition_data_points(data: Data, num_parts: int = 2):
         loop=True,
         max_num_neighbors=64,
     )
+    data.edge_index = edge_index
 
-    clusters = graclus(edge_index, num_nodes=N)
+    clusters = torch.zeros(N, dtype=torch.long)
 
-    if num_parts == 2:
-        clusters = clusters % num_parts
-    else:
-        raise NotImplementedError()
+    sizes = {0: N}
+    for p in range(1, num_parts):
+        idx: int = max(sizes, key=sizes.get)  # type: ignore
+
+        mask = clusters == idx
+        global_nodes = mask.nonzero(as_tuple=False).view(-1)
+
+        Gp = data.subgraph(mask)
+        assert Gp.edge_index is not None
+
+        cl = graclus(Gp.edge_index, num_nodes=Gp.num_nodes) % 2
+
+        clusters[global_nodes[cl == 0]] = idx
+        clusters[global_nodes[cl == 1]] = p
+
+        sizes[idx] = (cl == 0).sum().item()  # type: ignore
+        sizes[p] = (cl == 1).sum().item()  # type: ignore
 
     subgraphs = dict()
     for i in range(num_parts):
