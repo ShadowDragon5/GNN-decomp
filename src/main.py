@@ -345,25 +345,26 @@ def main(cfg: DictConfig):
                         to_undirected=True,
                     )
                     pos = {
-                        # node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
+                        node: (x[node, -2].item(), x[node, -1].item())  # CIFAR
                         # node: data.get("coords", i, device)[node]  # Wave2D
                         # node: data.get("pos", i, device)[node]  # AirfRANS
-                        node: pos[node]
+                        # node: pos[node]
                         for node in range(N)
                     }
 
-                    # rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
+                    rgb = x[:, :3].clamp(0, 1).cpu().numpy()  # Shape: (N, 3)
 
                     nx.draw(
                         G,
                         pos,
                         node_size=1,
-                        node_color=["steelblue", "crimson"][i],
+                        # node_color=["steelblue", "crimson"][i],
+                        node_color=rgb,
                         edge_color="gray",
                         with_labels=False,
                     )
 
-                plt.savefig(f"graphs/airfrans/graph{d}.png", dpi=300)
+                plt.savefig(f"graphs/cifar_new/graph{d}.pdf", dpi=300)
 
                 if d == 5:
                     break

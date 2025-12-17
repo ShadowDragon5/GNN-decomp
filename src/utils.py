@@ -3,8 +3,10 @@ import re
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
-from torch_geometric.nn import graclus, radius_graph
+from torch_geometric.nn import radius_graph
 from torch_geometric.utils import to_scipy_sparse_matrix
+
+from graclus import graclus_kway
 
 
 class PartitionedData(Data):
@@ -157,8 +159,6 @@ def partition_data_points(data: Data, num_parts: int = 2):
     assert data.x is not None
     assert data.pos is not None
 
-    N = data.pos.size(0)
-
     edge_index = radius_graph(
         x=data.pos,
         r=0.05,
@@ -167,25 +167,7 @@ def partition_data_points(data: Data, num_parts: int = 2):
     )
     data.edge_index = edge_index
 
-    clusters = torch.zeros(N, dtype=torch.long)
-
-    sizes = {0: N}
-    for p in range(1, num_parts):
-        idx: int = max(sizes, key=sizes.get)  # type: ignore
-
-        mask = clusters == idx
-        global_nodes = mask.nonzero(as_tuple=False).view(-1)
-
-        Gp = data.subgraph(mask)
-        assert Gp.edge_index is not None
-
-        cl = graclus(Gp.edge_index, num_nodes=Gp.num_nodes) % 2
-
-        clusters[global_nodes[cl == 0]] = idx
-        clusters[global_nodes[cl == 1]] = p
-
-        sizes[idx] = (cl == 0).sum().item()  # type: ignore
-        sizes[p] = (cl == 1).sum().item()  # type: ignore
+    clusters = graclus_kway(data, num_parts)
 
     subgraphs = dict()
     for i in range(num_parts):
