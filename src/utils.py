@@ -75,7 +75,10 @@ def get_data(
     # sample points
     n = pos.size(0)
     sampleN = 32000
-    idx = torch.multinomial(torch.ones(n, device=device), sampleN)
+    if n <= sampleN:
+        idx = torch.arange(n, device=device)
+    else:
+        idx = torch.multinomial(torch.ones(n, device=device), sampleN)
 
     edge_index = radius_graph(
         x=pos[idx],
