@@ -7,7 +7,6 @@ import mlflow
 import numpy as np
 import pandas as pd
 import torch
-from mlflow.pytorch import log_model
 from numpy import ceil
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
@@ -440,9 +439,6 @@ class Preconditioned(Trainer):
                 {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
                 step=scaled_epochs - 1,
             )
-
-            if epoch % 10 == 9:
-                log_model(self.model, "model")
 
         if self.need_acc:
             accuracy = self.test()
