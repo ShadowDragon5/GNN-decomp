@@ -39,7 +39,7 @@ class WEIGHTING_STRATEGY(StrEnum):
 
 def apply_to_models(a: dict, fun: Callable, b: dict | None = None, indexed=False):
     """Apply `fun` to `a` model state dictionary (inplace)"""
-    for l, key in enumerate(reversed(a)):  # L -> 1
+    for l, key in enumerate(reversed(a), start=1):  # L -> 1
         if a[key].data.dtype == torch.float:
             if b is None:
                 a[key] = fun(a[key])
