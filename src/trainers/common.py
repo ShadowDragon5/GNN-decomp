@@ -1,14 +1,33 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from enum import StrEnum, auto
 from typing import Callable, Literal, Type
 
 import torch
+from torch.linalg import vector_norm
 from torch.optim import SGD, Adam, RMSprop
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from models.common import GNN
 from utils import get_data
+
+
+class GAMMA_ALGO(StrEnum):
+    """Contribution combination algorithm that determines the gamma weights"""
+
+    NONE = auto()
+    BACKTRACKING = auto()
+    BRENT = auto()
+    SGD = "SGD"
+
+
+class WEIGHTING_STRATEGY(StrEnum):
+    """Gamma function used for combining weighting the contributions"""
+
+    DIRECT = auto()
+    CLIPPED = auto()
+    INVERSE = auto()
 
 
 class Trainer(ABC):
@@ -150,3 +169,28 @@ class EarlyStopping:
             self.is_better = lambda a, best: a < best - min_delta
         else:
             self.is_better = lambda a, best: a > best + min_delta
+
+
+def apply_to_models(a: dict, fun: Callable, b: dict | None = None, indexed=False):
+    """Apply `fun` to `a` model state dictionary (inplace)"""
+    for l, key in enumerate(reversed(a), start=1):  # L -> 1
+        if a[key].data.dtype == torch.float:
+            if b is None:
+                a[key] = fun(a[key])
+            elif indexed:
+                a[key] = fun(a[key], b[key], l)
+            else:
+                a[key] = fun(a[key], b[key])
+
+
+def parameter_norm(params: dict) -> float:
+    norm = vector_norm(
+        torch.cat([p.view(-1) for p in params.values() if p is not None])
+    )
+    return norm.item()
+
+
+def parameter_dot(grad: dict, params: dict) -> float:
+    a = torch.cat([g.view(-1) for g in grad.values() if g is not None])
+    b = torch.cat([params[k].view(-1) for k in grad.keys() if params[k] is not None])
+    return torch.dot(a, b).item()

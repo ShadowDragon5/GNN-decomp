@@ -11,7 +11,7 @@ import mlflow
 import networkx as nx
 import numpy as np
 import torch
-from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
+from hyperopt import STATUS_OK, Trials, fmin, tpe
 from mlflow.pytorch import log_model
 from omegaconf import DictConfig
 from torch_geometric.data import Data, Dataset
@@ -28,6 +28,7 @@ from trainers import (
     Batched,
     MGN_trainer,
     Preconditioned,
+    Preconditioned_Adagrad,
     Trainer,
 )
 from utils import (
@@ -52,6 +53,7 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "pre-accumulating": Preconditioned,
     "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
     "mgn-batched": MGN_trainer,  # MGN baseline
+    "pre-adagrad": Preconditioned_Adagrad,
 }
 
 SCHEDULERS = {
