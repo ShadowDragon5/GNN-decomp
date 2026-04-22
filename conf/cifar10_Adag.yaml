@@ -1,0 +1,11 @@
+defaults:
+  - cifar10_base
+  - _self_
+
+name: A
+trainer: pre-adagrad
+full_batches: all
+partitions: 2
+
+ASM: true
+gamma_algo: none

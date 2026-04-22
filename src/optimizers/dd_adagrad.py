@@ -2,6 +2,7 @@ from typing import Callable, Iterable
 
 import torch
 from torch import Tensor
+from torch.optim.optimizer import StateDict
 
 
 def flatten(tensors: Iterable[torch.Tensor]) -> torch.Tensor:
@@ -12,16 +13,35 @@ class DD_Adagrad(torch.optim.Optimizer):
     def __init__(
         self,
         params: Iterable[Tensor],
-        theta1=0.0,
-        theta2=torch.inf,
+        higher_state: StateDict | None = None,
         k1=0.001,
         k2=2,
+        stop_early=False,
         foreach=False,
     ) -> None:
+        self.first_iter = True
+        self.stop_early = stop_early
+        self.k1 = k1
+        self.k2 = k2
+
+        w_lk = None
+        theta1 = 0.0
+        theta2 = torch.inf
+
+        if higher_state is not None:
+            gr = higher_state["param_groups"][0]
+            gradient: Tensor = gr["gradient"]
+            assert gradient is not None, (
+                "Higher optimizer state should have a valid gradient"
+            )
+            w_lk = torch.clone(gr["w_lk"])
+
+            theta1, theta2 = self.compute_thetas(gradient, w_lk)
 
         defaults = {
             "theta1": theta1,
             "theta2": theta2,
+            "gradient": None,
         }
         super().__init__(params, defaults)
 
@@ -33,27 +53,54 @@ class DD_Adagrad(torch.optim.Optimizer):
 
         group = self.param_groups[0]
         self._params = group["params"]
-        self.first_iter = True
-        self.k1 = k1
-        self.k2 = k2
 
-        if foreach:
-            self.step = self.step_foreach
-            group["w_lk"] = [torch.full_like(t, 0.01) for t in self._params]
+        # FIXME:
+        # if foreach:
+        #     self.step = self.step_foreach
+        #     group["w_lk"] = [torch.full_like(t, 0.01) for t in self._params]
+        # else:
+        #     group["w_lk"] = torch.full_like(flatten(self._params), 0.01)
+
+        if w_lk is not None:
+            group["w_lk"] = w_lk
         else:
             group["w_lk"] = torch.full_like(flatten(self._params), 0.01)
 
     @torch.no_grad()
-    def get_thetas(self, closure: Callable):
-        _, grad_flat, delta, s = self.step_init(closure)
+    def compute_thetas(self, gradient, w_lk):
 
-        theta1 = self.k1 * (grad_flat @ delta).abs().item()
+        delta = gradient.abs() / w_lk
+
+        # Prolongation
+        s = torch.clamp(-gradient, -delta, delta)
+
+        theta1 = self.k1 * (gradient @ delta).abs().item()
         theta2 = self.k2 * s.norm().item()
 
         return theta1, theta2
 
+    # @torch.no_grad()
+    # def get_thetas(self, params):
+    #     group = self.param_groups[0]
+    #     w_lk = group["w_lk"]
+    #
+    #     grad_flat = torch.cat([p.grad.flatten() for p in params if p.grad is not None])
+    #
+    #     w_lk = (grad_flat**2 + w_lk**2).sqrt()
+    #     delta = grad_flat.abs() / w_lk
+    #
+    #     group["w_lk"] = w_lk
+    #
+    #     # Prolongation
+    #     s = torch.clamp(-grad_flat, -delta, delta)
+    #
+    #     theta1 = self.k1 * (grad_flat @ delta).abs().item()
+    #     theta2 = self.k2 * s.norm().item()
+    #
+    #     return theta1, theta2
+
     @torch.no_grad()
-    def step_init(self, closure: Callable):
+    def step(self, closure: Callable):  # type: ignore[override]
         group = self.param_groups[0]
         w_lk = group["w_lk"]
         theta1 = group["theta1"]
@@ -68,6 +115,8 @@ class DD_Adagrad(torch.optim.Optimizer):
             )
             grad_flat = flatten(gradient)
 
+        group["gradient"] = grad_flat
+
         w_lk = (grad_flat**2 + w_lk**2).sqrt()
         delta = grad_flat.abs() / w_lk
 
@@ -79,18 +128,11 @@ class DD_Adagrad(torch.optim.Optimizer):
 
         group["w_lk"] = w_lk
 
-        if (grad_flat @ delta).abs().item() < theta1:
-            pass
+        if self.stop_early and (grad_flat @ delta).abs().item() < theta1:
+            return loss
 
         # Prolongation
         s_lk = torch.clamp(-grad_flat, -delta, delta)
-
-        return loss, grad_flat, delta, s_lk
-
-    @torch.no_grad()
-    def step(self, closure: Callable):  # type: ignore[override]
-
-        loss, grad_flat, _, s_lk = self.step_init(closure)
 
         # Taylor step
         with torch.enable_grad():
@@ -112,10 +154,12 @@ class DD_Adagrad(torch.optim.Optimizer):
 
         return loss
 
+    # PERF: check if this is faster than the regular step
     @torch.no_grad()
     def step_foreach(self, closure: Callable):
         group = self.param_groups[0]
         w_lk = group["w_lk"]
+        theta1 = group["theta1"]
         theta2 = group["theta2"]
 
         with torch.enable_grad():
@@ -133,8 +177,9 @@ class DD_Adagrad(torch.optim.Optimizer):
         )
         delta = torch._foreach_div(torch._foreach_abs(gradient), w_lk)
 
-        norm_delta = torch._foreach_norm(delta)
-        if theta2 < torch.inf:
+        if theta2 < torch.inf and self.first_iter:
+            self.first_iter = False
+            norm_delta = torch._foreach_norm(delta)
             w_lk = torch._foreach_mul(
                 torch._foreach_maximum(torch._foreach_div(norm_delta, theta2), 1),
                 w_lk,

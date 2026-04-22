@@ -1,5 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
+from itertools import cycle
 from typing import Any
 
 import mlflow
@@ -7,6 +8,7 @@ import pandas as pd
 import torch
 from numpy import ceil
 from torch.func import functional_call
+from torch.optim.optimizer import StateDict
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
@@ -30,6 +32,7 @@ class Preconditioned_Adagrad(Trainer):
         self,
         pre_epochs: int,
         full_epochs: int,
+        full_batches: str | int,
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
@@ -45,6 +48,7 @@ class Preconditioned_Adagrad(Trainer):
         super().__init__(**kwargs)
         self.pre_epochs = pre_epochs  # epochs over partitioned graph data
         self.full_epochs = full_epochs  # epochs over full graph data
+        self.full_batches = full_batches
         self.part_trainloader = part_trainloader
         self.num_parts = num_parts
         self.gamma_algo = gamma_algo
@@ -63,8 +67,7 @@ class Preconditioned_Adagrad(Trainer):
     def precondition(
         self,
         model_g: GNN,
-        theta1: float,
-        theta2: float,
+        higher_state: StateDict,
         i: int,
         epoch: int,
     ) -> dict[str, Any]:
@@ -76,7 +79,7 @@ class Preconditioned_Adagrad(Trainer):
         model = deepcopy(model_g).to(self.device)
         weights_0 = deepcopy(model_g.state_dict())
 
-        optimizer = DD_Adagrad(model.parameters(), theta1, theta2)
+        optimizer = DD_Adagrad(model.parameters(), higher_state)
 
         model.train()
 
@@ -113,44 +116,76 @@ class Preconditioned_Adagrad(Trainer):
 
     def run(self) -> float:
         optimizer = DD_Adagrad(self.model.parameters())
+        if isinstance(self.full_batches, int):
+            trainloader = cycle(self.trainloader)
+        else:
+            trainloader = self.trainloader
 
         self.model.to(self.device)
 
         valid_loss = defaultdict(float)
         scaled_epochs = 0
         for epoch in range(self.epochs):
-            # Preconditioning step
+            # Taylor step
+            train_loss = 0
+            self.model.train()
 
             optimizer.zero_grad()
 
-            def closure_full():
-                loss = 0
-                for data in tqdm(
-                    self.validloader,
+            for i, data in enumerate(
+                tqdm(
+                    trainloader,
                     desc=f"Epoch: {epoch:03}",
                     dynamic_ncols=True,
                     disable=self.quiet,
-                ):
-                    data.to(self.device)
+                    total=self.full_batches
+                    if isinstance(self.full_batches, int)
+                    else None,
+                )
+            ):
+                data.to(self.device)
 
+                def closure():
                     out, y = self.model(**get_data(data))
-                    loss = loss + self.model.loss(out, y)["loss"]
-                return loss
+                    return self.model.loss(out, y)["loss"]
 
-            theta1, theta2 = optimizer.get_thetas(closure_full)
-            optimizer.zero_grad()
+                loss = optimizer.step(closure)
+                train_loss += loss.detach().item()
+                optimizer.zero_grad()
 
-            contributions = []
+                if isinstance(self.full_batches, int) and i >= self.full_batches:
+                    break
 
-            for i in range(self.num_parts):
-                delta_w = self.precondition(
+            train_loss /= len(self.trainloader)
+
+            # Preconditioning step
+
+            # optimizer.zero_grad()
+            # # Compute gradient for inner optimizer initialization
+            # self.model.eval()
+            # for data in tqdm(
+            #     self.trainloader,
+            #     desc=f"Epoch: {epoch:03}",
+            #     dynamic_ncols=True,
+            #     disable=self.quiet,
+            # ):
+            #     data.to(self.device)
+            #     out, y = self.model(**get_data(data))
+            #     loss = self.model.loss(out, y)["loss"]
+            #     loss.backward()
+            #     break
+            # theta1, theta2 = optimizer.get_thetas(self.model.parameters())
+            # optimizer.zero_grad()
+
+            contributions = [
+                self.precondition(
                     model_g=self.model,
-                    theta1=theta1,
-                    theta2=theta2,
+                    higher_state=optimizer.state_dict(),  # NOTE: uses the last batch gradient before update
                     i=i,
                     epoch=epoch,
                 )
-                contributions.append(delta_w)
+                for i in range(self.num_parts)
+            ]
 
             # Contribution combination
             if self.gamma_algo == GAMMA_ALGO.SGD:
@@ -170,35 +205,12 @@ class Preconditioned_Adagrad(Trainer):
 
             scaled_epochs += int(ceil(self.pre_epochs / self.num_parts))
 
-            # LOGGING
-            vloss = self.validate(self.model)  # model.eval()
-            mlflow.log_metrics(
-                {f"after_pre/{k}": v for k, v in vloss.items()},
-                step=epoch,
-            )
-
-            # Full pass
-            train_loss = 0
-            self.model.train()
-
-            optimizer.zero_grad()
-            for data in tqdm(
-                self.trainloader,
-                desc=f"Epoch: {epoch:03}",
-                dynamic_ncols=True,
-                disable=self.quiet,
-            ):
-                data.to(self.device)
-
-                def closure():
-                    out, y = self.model(**get_data(data))
-                    return self.model.loss(out, y)["loss"]
-
-                loss = optimizer.step(closure)
-                train_loss += loss.detach().item()
-                optimizer.zero_grad()
-
-            train_loss /= len(self.trainloader)
+            # # LOGGING
+            # vloss = self.validate(self.model)  # model.eval()
+            # mlflow.log_metrics(
+            #     {f"after_pre/{k}": v for k, v in vloss.items()},
+            #     step=epoch,
+            # )
 
             mlflow.log_metrics(
                 {

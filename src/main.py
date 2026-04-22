@@ -11,7 +11,6 @@ import mlflow
 import networkx as nx
 import numpy as np
 import torch
-from hyperopt import STATUS_OK, Trials, fmin, tpe
 from mlflow.pytorch import log_model
 from omegaconf import DictConfig
 from torch_geometric.data import Data, Dataset
@@ -374,13 +373,15 @@ def main(cfg: DictConfig):
 
     # learning rates and weight decays
     # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
-    search_space = {
+    # search_space = {
+    trainer_params = {
         "lr": cfg.model.lr,
         "wd": cfg.model.wd,
         **(
             {
                 "pre_epochs": cfg.pre_epochs,
                 "full_epochs": cfg.full_epochs,
+                "full_batches": cfg.full_batches,
                 # "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
                 # "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
                 "pre_lr": cfg.model.pre_lr,
@@ -394,6 +395,7 @@ def main(cfg: DictConfig):
             else {}
         ),
     }
+    trainer_params
 
     name = ""
     if cfg.name:
@@ -469,18 +471,11 @@ def main(cfg: DictConfig):
             loss = trainer.run()
 
             log_model(trainer.model, "model")
-        return {"loss": loss, "status": STATUS_OK}
+        return {"loss": loss}
 
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
-    trials = Trials()
-    fmin(
-        fn=objective,
-        space=search_space,
-        algo=tpe.suggest,
-        max_evals=cfg.max_evals,
-        trials=trials,
-        show_progressbar=False,
-    )
+
+    objective(trainer_params)
 
 
 if __name__ == "__main__":
