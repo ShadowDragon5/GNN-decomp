@@ -371,31 +371,15 @@ def main(cfg: DictConfig):
                     break
             return
 
-    # learning rates and weight decays
-    # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
-    # search_space = {
     trainer_params = {
         "lr": cfg.model.lr,
         "wd": cfg.model.wd,
-        **(
-            {
-                "pre_epochs": cfg.pre_epochs,
-                "full_epochs": cfg.full_epochs,
-                "full_batches": cfg.full_batches,
-                # "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
-                # "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
-                "pre_lr": cfg.model.pre_lr,
-                # if args.pre_lr is not None
-                # else hp.choice("pre_lr", LRnWDs),
-                "pre_wd": cfg.model.pre_wd,
-                # if cfg.pre_wd is not None
-                # else hp.choice("pre_wd", LRnWDs),
-            }
-            if has_pre
-            else {}
-        ),
+        "pre_epochs": cfg.pre_epochs,
+        "full_epochs": cfg.full_epochs,
+        "full_batches": cfg.full_batches,
+        "pre_lr": cfg.model.pre_lr,
+        "pre_wd": cfg.model.pre_wd,
     }
-    trainer_params
 
     name = ""
     if cfg.name:
@@ -407,75 +391,73 @@ def main(cfg: DictConfig):
             name += "MS_"  # Multiplicative
     name += f"P{cfg.partitions}_S{cfg.seed}_{cfg.trainer}"
 
-    def objective(trainer_params):
-        n_classes = None
-        if cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN]:
-            n_classes = trainset.num_classes
-
-        model = MODELS[cfg.model.base](
-            in_dim=trainset.num_features,
-            hidden_dim=cfg.model.hidden_dim,
-            out_dim=cfg.model.out_dim,
-            edge_dim=3,
-            num_steps=10,
-            device=device,
-            dropout=cfg.model.dropout,
-            n_classes=n_classes,
-        )
-
-        with mlflow.start_run(
-            run_name=f"{cfg.dataset}_{name}",
-            description=cfg.description,
-        ):
-            mlflow.log_params(
-                {
-                    "seed": cfg.seed,
-                    "trainer": cfg.trainer,
-                    "optimizer": cfg.optim,
-                    "model": cfg.model.base,
-                    "hidden_dim": cfg.model.hidden_dim,
-                    "dataset": cfg.dataset,
-                    "batch": cfg.dev.batch,
-                    "epochs": cfg.epochs,
-                    "additive": cfg.ASM,
-                    "line search": cfg.gamma_algo,
-                    "gamma opt. lr": cfg.gamma_lr,
-                    "gamma weighting": cfg.gamma_strat,
-                    "partitions": cfg.partitions,
-                    "optim target": cfg.target,
-                    **trainer_params,
-                }
-            )
-            trainer = TRAINERS[cfg.trainer](
-                name=name,
-                model=model,
-                trainloader=trainloader,
-                validloader=validloader,
-                testloader=testloader,
-                device=device,
-                quiet=cfg.dev.q,
-                part_trainloader=part_trainloader,
-                num_parts=cfg.partitions,
-                ASM=cfg.ASM,
-                epochs=cfg.epochs,
-                gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
-                target=cfg.target,
-                need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
-                optim=OPTIM[cfg.optim],
-                ll_resolution=cfg.ll_resolution,
-                gamma_lr=cfg.gamma_lr,
-                gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
-                scheduler=SCHEDULERS[cfg.model.base],
-                **trainer_params,
-            )
-            loss = trainer.run()
-
-            log_model(trainer.model, "model")
-        return {"loss": loss}
-
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
 
-    objective(trainer_params)
+    n_classes = (
+        trainset.num_classes
+        if cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN]
+        else None
+    )
+
+    model = MODELS[cfg.model.base](
+        in_dim=trainset.num_features,
+        hidden_dim=cfg.model.hidden_dim,
+        out_dim=cfg.model.out_dim,
+        edge_dim=3,
+        num_steps=10,
+        device=device,
+        dropout=cfg.model.dropout,
+        n_classes=n_classes,
+    )
+
+    with mlflow.start_run(
+        run_name=f"{cfg.dataset}_{name}",
+        description=cfg.description,
+    ):
+        mlflow.log_params(
+            {
+                "seed": cfg.seed,
+                "trainer": cfg.trainer,
+                "optimizer": cfg.optim,
+                "model": cfg.model.base,
+                "hidden_dim": cfg.model.hidden_dim,
+                "dataset": cfg.dataset,
+                "batch": cfg.dev.batch,
+                "epochs": cfg.epochs,
+                "additive": cfg.ASM,
+                "line search": cfg.gamma_algo,
+                "gamma opt. lr": cfg.gamma_lr,
+                "gamma weighting": cfg.gamma_strat,
+                "partitions": cfg.partitions,
+                "optim target": cfg.target,
+                **trainer_params,
+            }
+        )
+        trainer = TRAINERS[cfg.trainer](
+            name=name,
+            model=model,
+            trainloader=trainloader,
+            validloader=validloader,
+            testloader=testloader,
+            device=device,
+            quiet=cfg.dev.q,
+            part_trainloader=part_trainloader,
+            num_parts=cfg.partitions,
+            ASM=cfg.ASM,
+            epochs=cfg.epochs,
+            gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
+            target=cfg.target,
+            need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
+            optim=OPTIM[cfg.optim],
+            ll_resolution=cfg.ll_resolution,
+            gamma_lr=cfg.gamma_lr,
+            gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
+            scheduler=SCHEDULERS[cfg.model.base],
+            **trainer_params,
+        )
+        trainer.run()
+
+        log_model(trainer.model, "model")
 
 
 if __name__ == "__main__":

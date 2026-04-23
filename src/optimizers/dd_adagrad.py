@@ -53,6 +53,7 @@ class DD_Adagrad(torch.optim.Optimizer):
 
         group = self.param_groups[0]
         self._params = group["params"]
+        self.device = self._params[0].device
 
         # FIXME:
         # if foreach:
@@ -64,7 +65,11 @@ class DD_Adagrad(torch.optim.Optimizer):
         if w_lk is not None:
             group["w_lk"] = w_lk
         else:
-            group["w_lk"] = torch.full_like(flatten(self._params), 0.01)
+            group["w_lk"] = torch.full_like(
+                flatten(self._params),
+                0.01,
+                device=self.device,
+            )
 
     @torch.no_grad()
     def compute_thetas(self, gradient, w_lk):
@@ -102,7 +107,7 @@ class DD_Adagrad(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self, closure: Callable):  # type: ignore[override]
         group = self.param_groups[0]
-        w_lk = group["w_lk"]
+        w_lk = group["w_lk"].to(self.device)
         theta1 = group["theta1"]
         theta2 = group["theta2"]
 
@@ -113,7 +118,7 @@ class DD_Adagrad(torch.optim.Optimizer):
                 self._params,
                 create_graph=True,
             )
-            grad_flat = flatten(gradient)
+            grad_flat = flatten(gradient).to(self.device)
 
         group["gradient"] = grad_flat
 
@@ -126,10 +131,10 @@ class DD_Adagrad(torch.optim.Optimizer):
             w_lk *= max(1, norm_delta / theta2)
             delta *= min(1, theta2 / norm_delta)
 
-        group["w_lk"] = w_lk
+            if self.stop_early and (grad_flat @ delta).abs().item() < theta1:
+                return loss
 
-        if self.stop_early and (grad_flat @ delta).abs().item() < theta1:
-            return loss
+        group["w_lk"] = w_lk
 
         # Prolongation
         s_lk = torch.clamp(-grad_flat, -delta, delta)
@@ -139,18 +144,19 @@ class DD_Adagrad(torch.optim.Optimizer):
             grad_dot_s = grad_flat @ s_lk
             hvp = torch.autograd.grad(grad_dot_s, self._params, retain_graph=True)
 
-        hvp_flat = flatten(hvp)
+        hvp_flat = flatten(hvp).to(self.device)
+        # s^T @ B @ s
         curvature = s_lk @ hvp_flat
 
-        lr = min(1.0, (-s_lk @ grad_flat / curvature).item()) if curvature > 0 else 1.0
+        # gamma
+        lr = min(1.0, (-grad_flat @ s_lk / curvature).item()) if curvature > 0 else 1.0
 
         # apply step
-        numels = [p.numel() for p in self._params]
-        splits = torch.split(s_lk, numels)
+        splits = torch.split(s_lk, [p.numel() for p in self._params])
         shaped_steps = [s.view_as(p) for s, p in zip(splits, self._params)]
 
         for p, step in zip(self._params, shaped_steps):
-            p.add_(step, alpha=lr)
+            p.add_(step.to(p.device), alpha=lr)
 
         return loss
 

@@ -21,6 +21,7 @@ from .common import (
     EarlyStopping,
     Trainer,
     apply_to_models,
+    build_model,
     parameter_dot,
     parameter_norm,
 )
@@ -288,7 +289,7 @@ class Preconditioned(Trainer):
                         )
 
                     w_avg = deepcopy(self.model.state_dict())
-                    w_avg = self.build_model(w_avg, gammas, contributions)
+                    w_avg = build_model(self.gamma_strat, w_avg, gammas, contributions)
 
                     self.model.load_state_dict(w_avg)
 
@@ -526,7 +527,7 @@ class Preconditioned(Trainer):
                 data.to(self.device)
                 # NOTE: rebuilding required for computational graph
                 theta = deepcopy(params)
-                theta = self.build_model(theta, gammas, contributions)
+                theta = build_model(self.gamma_strat, theta, gammas, contributions)
 
                 out, y = functional_call(
                     self.model, (theta, buffers), kwargs=get_data(data)
@@ -589,7 +590,7 @@ class Preconditioned(Trainer):
 
         def loss_fn(gammas):
             theta = deepcopy(params)
-            theta = self.build_model(theta, gammas, contributions)
+            theta = build_model(self.gamma_strat, theta, gammas, contributions)
 
             total_loss = torch.tensor([0.0], device=self.device)
             for data in tqdm(
@@ -633,27 +634,3 @@ class Preconditioned(Trainer):
         path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.npy"  # type: ignore
         np.save(path, Z)
         mlflow.log_artifact(path)
-
-    def build_model(self, theta, gammas, contributions):
-        def weigthing_strategy(a, b, l, i):
-            match self.gamma_strat:
-                case WEIGHTING_STRATEGY.DIRECT:
-                    return a + gammas[i] * b
-                case WEIGHTING_STRATEGY.CLIPPED:
-                    if l >= 4 * 2:  # weight + bias
-                        return (a + gammas[i] * b).detach()
-                    return a + gammas[i] * b
-                case WEIGHTING_STRATEGY.INVERSE:
-                    base = 2
-                    # NOTE: gammas must be positive (>0)
-                    return a + (gammas[i] ** (base**-l)) * b
-
-        for i, delta_w in enumerate(contributions):
-            apply_to_models(
-                a=theta,
-                fun=lambda a, b, l: weigthing_strategy(a, b, l, i),
-                b=delta_w,
-                indexed=True,
-            )
-
-        return theta

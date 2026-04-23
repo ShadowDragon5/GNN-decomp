@@ -194,3 +194,28 @@ def parameter_dot(grad: dict, params: dict) -> float:
     a = torch.cat([g.view(-1) for g in grad.values() if g is not None])
     b = torch.cat([params[k].view(-1) for k in grad.keys() if params[k] is not None])
     return torch.dot(a, b).item()
+
+
+def build_model(gamma_strat: WEIGHTING_STRATEGY, theta, gammas, contributions):
+    def weigthing_strategy(a, b, l, i):
+        match gamma_strat:
+            case WEIGHTING_STRATEGY.DIRECT:
+                return a + gammas[i] * b
+            case WEIGHTING_STRATEGY.CLIPPED:
+                if l >= 4 * 2:  # weight + bias
+                    return (a + gammas[i] * b).detach()
+                return a + gammas[i] * b
+            case WEIGHTING_STRATEGY.INVERSE:
+                base = 2
+                # NOTE: gammas must be positive (>0)
+                return a + (gammas[i] ** (base**-l)) * b
+
+    for i, delta_w in enumerate(contributions):
+        apply_to_models(
+            a=theta,
+            fun=lambda a, b, l: weigthing_strategy(a, b, l, i),
+            b=delta_w,
+            indexed=True,
+        )
+
+    return theta
