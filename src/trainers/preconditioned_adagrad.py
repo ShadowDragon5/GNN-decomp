@@ -125,7 +125,7 @@ class Preconditioned_Adagrad(Trainer):
         self.model.to(self.device)
 
         valid_loss = defaultdict(float)
-        scaled_epochs = 0
+        # scaled_epochs = 0
         for epoch in range(self.epochs):
             # Taylor step
             train_loss = 0
@@ -158,6 +158,23 @@ class Preconditioned_Adagrad(Trainer):
                     break
 
             train_loss /= len(self.trainloader)
+
+            # Validation
+            valid_loss = self.validate(self.model)
+
+            if not self.quiet:
+                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
+
+            mlflow.log_metrics(
+                {"train/loss": train_loss}
+                | {f"validate/{k}": v for k, v in valid_loss.items()},
+                step=epoch,
+            )
+
+            # mlflow.log_metrics(
+            #     {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
+            #     step=scaled_epochs - 1,
+            # )
 
             # Preconditioning step
 
@@ -204,39 +221,22 @@ class Preconditioned_Adagrad(Trainer):
 
             self.model.load_state_dict(w_avg)
 
-            scaled_epochs += int(ceil(self.pre_epochs / self.num_parts))
+            # scaled_epochs += int(ceil(self.pre_epochs / self.num_parts))
 
-            # # LOGGING
-            # vloss = self.validate(self.model)  # model.eval()
-            # mlflow.log_metrics(
-            #     {f"after_pre/{k}": v for k, v in vloss.items()},
-            #     step=epoch,
-            # )
-
+            # LOGGING
+            vloss = self.validate(self.model)  # model.eval()
             mlflow.log_metrics(
-                {
-                    "train/scaled_loss": train_loss,
-                },
-                step=scaled_epochs,
-            )
-            scaled_epochs += 1
-
-            # Validation
-            valid_loss = self.validate(self.model)
-
-            if not self.quiet:
-                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
-
-            mlflow.log_metrics(
-                {"train/loss": train_loss}
-                | {f"validate/{k}": v for k, v in valid_loss.items()},
+                {f"after_pre/{k}": v for k, v in vloss.items()},
                 step=epoch,
             )
 
-            mlflow.log_metrics(
-                {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
-                step=scaled_epochs - 1,
-            )
+            # mlflow.log_metrics(
+            #     {
+            #         "train/scaled_loss": train_loss,
+            #     },
+            #     step=scaled_epochs,
+            # )
+            # scaled_epochs += 1
 
         return valid_loss["loss"]
 
