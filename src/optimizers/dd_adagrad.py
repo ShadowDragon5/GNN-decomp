@@ -19,6 +19,7 @@ class DD_Adagrad(torch.optim.Optimizer):
         k2=2,
         use_norms=True,
         foreach=False,
+        device=None,
     ) -> None:
         self.first_iter = True
         self.use_norms = use_norms
@@ -56,7 +57,8 @@ class DD_Adagrad(torch.optim.Optimizer):
 
         group = self.param_groups[0]
         self._params = group["params"]
-        self.device = self._params[0].device
+        # NOTE: this requires the model to be moved to device before calling this constructor
+        self.device = device if device is not None else self._params[0].device
 
         if foreach:
             self.step = self.step_foreach

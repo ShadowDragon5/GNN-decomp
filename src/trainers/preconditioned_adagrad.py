@@ -118,13 +118,12 @@ class Preconditioned_Adagrad(Trainer):
         return delta_w
 
     def run(self) -> float:
+        self.model.to(self.device)
         optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
         if isinstance(self.full_batches, int):
             trainloader = cycle(self.trainloader)
         else:
             trainloader = self.trainloader
-
-        self.model.to(self.device)
 
         valid_loss = defaultdict(float)
         k_iter = 0

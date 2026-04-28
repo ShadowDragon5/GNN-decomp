@@ -19,9 +19,8 @@ class BatchedAdagrad(Trainer):
         self.foreach = foreach
 
     def run(self) -> float:
-        optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
-
         self.model.to(self.device)
+        optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
 
         k_iter = 0
         valid_loss = defaultdict(float)
