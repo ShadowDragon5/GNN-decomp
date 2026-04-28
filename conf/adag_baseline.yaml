@@ -1,0 +1,14 @@
+defaults:
+  - base
+  - _self_
+  - model: GCN_SuperPix
+
+name: Baseline
+
+dataset: CIFAR10
+trainer: batch-adagrad
+partitions: 1
+epochs: 100
+
+full_batches: all
+foreach: false

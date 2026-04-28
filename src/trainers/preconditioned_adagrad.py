@@ -37,6 +37,7 @@ class Preconditioned_Adagrad(Trainer):
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
+        foreach: bool,
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
@@ -59,6 +60,7 @@ class Preconditioned_Adagrad(Trainer):
         self.ll_resolution = ll_resolution
         self.gamma_lr = gamma_lr
         self.gamma_strat = gamma_strat
+        self.foreach = foreach
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -80,7 +82,7 @@ class Preconditioned_Adagrad(Trainer):
         model = deepcopy(model_g).to(self.device)
         weights_0 = deepcopy(model_g.state_dict())
 
-        optimizer = DD_Adagrad(model.parameters(), higher_state)
+        optimizer = DD_Adagrad(model.parameters(), higher_state, foreach=self.foreach)
 
         model.train()
 
@@ -116,7 +118,7 @@ class Preconditioned_Adagrad(Trainer):
         return delta_w
 
     def run(self) -> float:
-        optimizer = DD_Adagrad(self.model.parameters())
+        optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
         if isinstance(self.full_batches, int):
             trainloader = cycle(self.trainloader)
         else:
@@ -125,7 +127,7 @@ class Preconditioned_Adagrad(Trainer):
         self.model.to(self.device)
 
         valid_loss = defaultdict(float)
-        # scaled_epochs = 0
+        k_iter = 0
         for epoch in range(self.epochs):
             # Taylor step
             train_loss = 0
@@ -151,13 +153,18 @@ class Preconditioned_Adagrad(Trainer):
                     return self.model.loss(out, y)["loss"]
 
                 loss = optimizer.step(closure)
+                k_iter += 1
                 train_loss += loss.detach().item()
                 optimizer.zero_grad()
 
                 if isinstance(self.full_batches, int) and i >= self.full_batches:
                     break
 
-            train_loss /= len(self.trainloader)
+            train_loss /= (
+                self.full_batches
+                if isinstance(self.full_batches, int)
+                else len(self.trainloader)
+            )
 
             # Validation
             valid_loss = self.validate(self.model)
@@ -168,7 +175,7 @@ class Preconditioned_Adagrad(Trainer):
             mlflow.log_metrics(
                 {"train/loss": train_loss}
                 | {f"validate/{k}": v for k, v in valid_loss.items()},
-                step=epoch,
+                step=k_iter,
             )
 
             # mlflow.log_metrics(
@@ -177,23 +184,6 @@ class Preconditioned_Adagrad(Trainer):
             # )
 
             # Preconditioning step
-
-            # optimizer.zero_grad()
-            # # Compute gradient for inner optimizer initialization
-            # self.model.eval()
-            # for data in tqdm(
-            #     self.trainloader,
-            #     desc=f"Epoch: {epoch:03}",
-            #     dynamic_ncols=True,
-            #     disable=self.quiet,
-            # ):
-            #     data.to(self.device)
-            #     out, y = self.model(**get_data(data))
-            #     loss = self.model.loss(out, y)["loss"]
-            #     loss.backward()
-            #     break
-            # theta1, theta2 = optimizer.get_thetas(self.model.parameters())
-            # optimizer.zero_grad()
 
             contributions = [
                 self.precondition(
@@ -205,8 +195,13 @@ class Preconditioned_Adagrad(Trainer):
                 for i in range(self.num_parts)
             ]
 
+            k_iter += int(
+                ceil(len(self.part_trainloader) * self.pre_epochs / self.num_parts)
+            )
+
             # Contribution combination
             if self.gamma_algo == GAMMA_ALGO.SGD:
+                # FIXME: this also adds cost
                 gammas = self.optimize_gammas(contributions, epoch)  # model.eval()
             else:
                 gammas = [1 / self.num_parts] * self.num_parts
@@ -229,14 +224,6 @@ class Preconditioned_Adagrad(Trainer):
                 {f"after_pre/{k}": v for k, v in vloss.items()},
                 step=epoch,
             )
-
-            # mlflow.log_metrics(
-            #     {
-            #         "train/scaled_loss": train_loss,
-            #     },
-            #     step=scaled_epochs,
-            # )
-            # scaled_epochs += 1
 
         return valid_loss["loss"]
 

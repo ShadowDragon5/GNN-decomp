@@ -25,6 +25,7 @@ from trainers import (
     WEIGHTING_STRATEGY,
     Accumulating,
     Batched,
+    BatchedAdagrad,
     MGN_trainer,
     Preconditioned,
     Preconditioned_Adagrad,
@@ -48,6 +49,7 @@ MODELS = {
 
 TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "batched": Batched,  # baseline
+    "batch-adagrad": BatchedAdagrad,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
     "pre-accumulating": Preconditioned,
     "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
@@ -379,6 +381,7 @@ def main(cfg: DictConfig):
         "full_batches": cfg.full_batches,
         "pre_lr": cfg.model.pre_lr,
         "pre_wd": cfg.model.pre_wd,
+        "foreach": cfg.foreach,
     }
 
     name = ""
