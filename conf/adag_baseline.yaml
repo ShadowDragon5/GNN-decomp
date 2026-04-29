@@ -9,6 +9,3 @@ dataset: CIFAR10
 trainer: batch-adagrad
 partitions: 1
 epochs: 100
-
-full_batches: all
-use_norms: false

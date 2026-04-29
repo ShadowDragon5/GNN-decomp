@@ -22,3 +22,7 @@ gamma_strat: direct
 
 seed: 42
 epochs: 100
+
+# Adagrad
+full_batches: all
+use_norms: false
