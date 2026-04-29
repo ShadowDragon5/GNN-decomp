@@ -12,15 +12,15 @@ from .common import Trainer
 class BatchedAdagrad(Trainer):
     def __init__(
         self,
-        foreach: bool,
+        use_norms: bool,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.foreach = foreach
+        self.use_norms = use_norms
 
     def run(self) -> float:
         self.model.to(self.device)
-        optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
+        optimizer = DD_Adagrad(self.model.parameters(), use_norms=self.use_norms)
 
         k_iter = 0
         valid_loss = defaultdict(float)

@@ -37,7 +37,7 @@ class Preconditioned_Adagrad(Trainer):
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
-        foreach: bool,
+        use_norms: bool,
         pre_lr: float = 0,
         pre_wd: float = 0,
         batched: bool = False,
@@ -60,7 +60,7 @@ class Preconditioned_Adagrad(Trainer):
         self.ll_resolution = ll_resolution
         self.gamma_lr = gamma_lr
         self.gamma_strat = gamma_strat
-        self.foreach = foreach
+        self.use_norms = use_norms
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -82,7 +82,9 @@ class Preconditioned_Adagrad(Trainer):
         model = deepcopy(model_g).to(self.device)
         weights_0 = deepcopy(model_g.state_dict())
 
-        optimizer = DD_Adagrad(model.parameters(), higher_state, foreach=self.foreach)
+        optimizer = DD_Adagrad(
+            model.parameters(), higher_state, use_norms=self.use_norms
+        )
 
         model.train()
 
@@ -119,7 +121,7 @@ class Preconditioned_Adagrad(Trainer):
 
     def run(self) -> float:
         self.model.to(self.device)
-        optimizer = DD_Adagrad(self.model.parameters(), foreach=self.foreach)
+        optimizer = DD_Adagrad(self.model.parameters(), use_norms=self.use_norms)
         if isinstance(self.full_batches, int):
             trainloader = cycle(self.trainloader)
         else:

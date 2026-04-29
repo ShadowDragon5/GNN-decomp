@@ -11,4 +11,4 @@ partitions: 1
 epochs: 100
 
 full_batches: all
-foreach: false
+use_norms: false
