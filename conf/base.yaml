@@ -16,6 +16,11 @@ target: train
 ASM: false
 gamma_algo: none
 optim: Adam
+optim_params:
+  use_norms: false
+  clamp_momentum: false
+  momentum_type: ema
+
 ll_resolution: 0
 gamma_lr: 0.01
 gamma_strat: direct
@@ -25,4 +30,3 @@ epochs: 100
 
 # Adagrad
 full_batches: all
-use_norms: false

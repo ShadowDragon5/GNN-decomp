@@ -381,7 +381,7 @@ def main(cfg: DictConfig):
         "full_batches": cfg.full_batches,
         "pre_lr": cfg.model.pre_lr,
         "pre_wd": cfg.model.pre_wd,
-        "use_norms": cfg.use_norms,
+        "optim_params": cfg.optim_params,
     }
 
     name = ""
