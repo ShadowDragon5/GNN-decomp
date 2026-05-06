@@ -35,8 +35,6 @@ class GNN(nn.Module, ABC):
         self,
         in_dim: int,
         hidden_dim: int,
-        out_dim: int,
-        dropout: float,
         device,
         **_,
     ) -> None:
@@ -44,8 +42,6 @@ class GNN(nn.Module, ABC):
 
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
-        self.out_dim = out_dim  # TODO: rename
-        self.dropout = dropout
         self.device = device
 
     @abstractmethod

@@ -1,0 +1,14 @@
+defaults:
+  - base
+  - _self_
+  - model: DCRNN
+  - trainer: pre_adag
+
+name: Baseline
+
+dataset: METR_LA
+partitions: 1
+epochs: 100
+
+dev:
+  batch: 1

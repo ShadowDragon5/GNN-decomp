@@ -1,0 +1,14 @@
+_target_: trainers.Preconditioned_Adagrad
+pre_epochs: 10
+full_epochs: 1
+full_batches: all
+
+partitions: 2
+
+gamma_algo: none
+
+optim_params:
+  use_norms: false
+  clamp_momentum: false
+  momentum_type: ema
+  beta: 0.9

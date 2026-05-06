@@ -17,6 +17,7 @@ dependencies = [
     "torch",
     "torch-cluster>=1.6.3",
     "torch-geometric",
+    "torch-geometric-temporal>=0.56.2",
     "tqdm",
 ]
 
