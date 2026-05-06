@@ -100,6 +100,12 @@ class DD_Adagrad(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step(self, closure: Callable):  # type: ignore[override]
+        """
+        Perform a single optimization step to update parameter.
+        Args:
+            closure (Callable): A closure that reevaluates the model and
+                returns the loss. Can not call `loss.backward()`
+        """
         group = self.param_groups[0]
         w_lk = group["w_lk"].to(self.device)
         theta2 = group["theta2"]

@@ -1,6 +1,5 @@
 from collections import defaultdict
 from copy import deepcopy
-from itertools import cycle
 from typing import Any
 
 import mlflow
@@ -23,6 +22,7 @@ from .common import (
     Trainer,
     apply_to_models,
     build_model,
+    cycle,
 )
 
 
@@ -48,7 +48,7 @@ class Preconditioned_Adagrad(Trainer):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.pre_epochs = pre_epochs  # epochs over partitioned graph data
+        self.pre_steps = pre_epochs  # steps over partitioned graph data
         self.full_epochs = full_epochs  # epochs over full graph data
         self.full_batches = full_batches
         self.part_trainloader = part_trainloader
@@ -87,26 +87,22 @@ class Preconditioned_Adagrad(Trainer):
         model.train()
 
         optimizer.zero_grad()
-        for pre_epoch in range(self.pre_epochs):
-            pre_train_loss = 0
+        for data in tqdm(
+            cycle(self.part_trainloader, self.pre_steps),
+            desc=f"P{i} E{epoch:03}",
+            dynamic_ncols=True,
+            leave=False,
+            disable=self.quiet,
+            total=self.pre_steps,
+        ):
 
-            for data in tqdm(
-                self.part_trainloader,
-                desc=f"P{i} E{epoch:03}: {pre_epoch:02}",
-                dynamic_ncols=True,
-                leave=False,
-                disable=self.quiet,
-            ):
+            def closure():
+                out, y = model(**get_data(data, i, self.device))
+                loss = model.loss(out, y)["loss"]
+                return loss
 
-                def closure():
-                    out, y = model(**get_data(data, i, self.device))
-                    loss = model.loss(out, y)["loss"]
-                    return loss
-
-                loss = optimizer.step(closure)
-                pre_train_loss += loss.detach().item()
-
-                optimizer.zero_grad()
+            optimizer.step(closure)
+            optimizer.zero_grad()
 
         # computing the weight difference
         delta_w = deepcopy(model.state_dict())
@@ -194,9 +190,7 @@ class Preconditioned_Adagrad(Trainer):
                 for i in range(self.num_parts)
             ]
 
-            k_iter += int(
-                ceil(len(self.part_trainloader) * self.pre_epochs / self.num_parts)
-            )
+            k_iter += int(ceil(self.pre_steps / self.num_parts))
 
             # Contribution combination
             if self.gamma_algo == GAMMA_ALGO.SGD:
@@ -238,7 +232,7 @@ class Preconditioned_Adagrad(Trainer):
         # gammas = gammas.requires_grad_()
 
         gamma_history = [gammas.detach().cpu().clone().numpy()]
-        gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr / self.pre_epochs)
+        gamma_optim = self.optim(params=[gammas], lr=self.gamma_lr / self.pre_steps)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             gamma_optim,

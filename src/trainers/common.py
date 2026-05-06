@@ -219,3 +219,13 @@ def build_model(gamma_strat: WEIGHTING_STRATEGY, theta, gammas, contributions):
         )
 
     return theta
+
+
+def cycle(iterator, n_iter=float("inf")):
+    i = 0
+    while i < n_iter:
+        for item in iterator:
+            yield item
+            i += 1
+            if i >= n_iter:
+                break

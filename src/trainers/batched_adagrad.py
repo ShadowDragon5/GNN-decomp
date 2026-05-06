@@ -27,6 +27,7 @@ class BatchedAdagrad(Trainer):
         for epoch in range(self.epochs):
             train_loss = 0
             self.model.train()
+            optimizer.zero_grad()
 
             for data in tqdm(
                 self.trainloader,
