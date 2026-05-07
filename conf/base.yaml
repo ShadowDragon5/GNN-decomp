@@ -18,8 +18,9 @@ gamma_algo: none
 optim: Adam
 optim_params:
   use_norms: false
-  clamp_momentum: false
-  momentum_type: ema
+  clamp_momentum: true
+  momentum_type: heavy_ball
+  beta: 0.9
 
 ll_resolution: 0
 gamma_lr: 0.01
