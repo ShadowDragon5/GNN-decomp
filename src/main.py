@@ -428,6 +428,7 @@ def main(cfg: DictConfig):
                 "trainer": cfg.trainer,
                 "optimizer": cfg.optim,
                 "model": cfg.model.base,
+                "model initialization": cfg.init_model,
                 "hidden_dim": cfg.model.hidden_dim,
                 "dataset": cfg.dataset,
                 "batch": cfg.dev.batch,
