@@ -139,7 +139,8 @@ class Preconditioned_Adagrad(Trainer):
                     total=self.full_batches
                     if isinstance(self.full_batches, int)
                     else None,
-                )
+                ),
+                start=1,
             ):
                 data.to(self.device)
 
@@ -194,7 +195,7 @@ class Preconditioned_Adagrad(Trainer):
 
             # Contribution combination
             if self.gamma_algo == GAMMA_ALGO.SGD:
-                # FIXME: this also adds cost
+                # FIXME: this adds cost and needs clamping
                 gammas = self.optimize_gammas(contributions, epoch)  # model.eval()
             else:
                 gammas = [1 / self.num_parts] * self.num_parts

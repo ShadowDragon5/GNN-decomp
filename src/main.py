@@ -20,6 +20,7 @@ from torch_geometric.utils import to_networkx
 
 from data import wave_data_2D_irrgular
 from models import GCN_CG, GCN_CN, GraphSAGE, MeshGraphNet
+from models.common import GNN
 from trainers import (
     GAMMA_ALGO,
     WEIGHTING_STRATEGY,
@@ -33,6 +34,7 @@ from trainers import (
 )
 from utils import (
     get_data,
+    init_weights,
     normalization_transform,
     partition_data_points,
     partition_transform_global,
@@ -402,7 +404,7 @@ def main(cfg: DictConfig):
         else None
     )
 
-    model = MODELS[cfg.model.base](
+    model: GNN = MODELS[cfg.model.base](
         in_dim=trainset.num_features,
         hidden_dim=cfg.model.hidden_dim,
         out_dim=cfg.model.out_dim,
@@ -412,6 +414,9 @@ def main(cfg: DictConfig):
         dropout=cfg.model.dropout,
         n_classes=n_classes,
     )
+
+    if cfg.init_model:
+        model.apply(init_weights)
 
     with mlflow.start_run(
         run_name=f"{cfg.dataset}_{name}",

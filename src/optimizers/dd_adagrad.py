@@ -20,6 +20,7 @@ class DD_Adagrad(torch.optim.Optimizer):
         self,
         params: Iterable[Tensor],
         higher_state: StateDict | None = None,
+        lr: float | None = None,
         k1=0.001,
         k2=2.0,
         beta=0.9,  # momentum
@@ -28,6 +29,7 @@ class DD_Adagrad(torch.optim.Optimizer):
         use_norms=False,
         device=None,
     ) -> None:
+        self.lr = lr
         self.use_norms = use_norms
         self.momentum_type = momentum_type
         self.clamp_momentum = clamp_momentum
@@ -140,6 +142,7 @@ class DD_Adagrad(torch.optim.Optimizer):
         s_lk = torch.clamp(-grad_flat, -delta, delta)
 
         # Taylor step
+        # FIXME: check for tolerances
         with torch.enable_grad():
             grad_dot_s = grad_flat @ s_lk
             hvp = torch.autograd.grad(grad_dot_s, self._params, retain_graph=True)
@@ -149,7 +152,14 @@ class DD_Adagrad(torch.optim.Optimizer):
         curvature = s_lk @ hvp_flat
 
         # gamma
-        lr = min(1.0, (-grad_flat @ s_lk / curvature).item()) if curvature > 0 else 1.0
+        if self.lr is None:
+            lr = (
+                min(1.0, (-grad_flat @ s_lk / curvature).item())
+                if curvature > 0
+                else 1.0
+            )
+        else:
+            lr = self.lr
 
         moment: Tensor = group["moment"]  # get reference
         match self.momentum_type:
