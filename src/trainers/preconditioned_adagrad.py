@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from models.common import GNN
 from optimizers.dd_adagrad import DD_Adagrad
-from utils import get_data
+from utils import coarsen_graph, get_data
 
 from .common import (
     GAMMA_ALGO,
@@ -32,8 +32,8 @@ class Preconditioned_Adagrad(Trainer):
     def __init__(
         self,
         pre_epochs: int,
-        full_epochs: int,
         full_batches: str | int,
+        coarse_batches: int,
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
@@ -49,8 +49,8 @@ class Preconditioned_Adagrad(Trainer):
     ) -> None:
         super().__init__(**kwargs)
         self.pre_steps = pre_epochs  # steps over partitioned graph data
-        self.full_epochs = full_epochs  # epochs over full graph data
         self.full_batches = full_batches
+        self.coarse_batches = coarse_batches
         self.part_trainloader = part_trainloader
         self.num_parts = num_parts
         self.gamma_algo = gamma_algo
@@ -178,6 +178,56 @@ class Preconditioned_Adagrad(Trainer):
             #     {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
             #     step=scaled_epochs - 1,
             # )
+
+            # Coarse step
+            if self.coarse_batches > 0:
+                coarse_optim = DD_Adagrad(
+                    self.model.parameters(),
+                    higher_state=optimizer.state_dict(),
+                    **self.optim_params,
+                )
+                for i, data in enumerate(
+                    tqdm(
+                        trainloader,
+                        desc=f"Coarse Epoch: {epoch:03}",
+                        dynamic_ncols=True,
+                        disable=self.quiet,
+                        total=self.coarse_batches,
+                    ),
+                    start=1,
+                ):
+                    data.to(self.device)
+                    coarse_data = coarsen_graph(data)
+                    coarse_data.y = data.y
+
+                    def closure():
+                        out, y = self.model(**get_data(coarse_data))
+                        return self.model.loss(out, y)["loss"]
+
+                    loss = coarse_optim.step(closure)
+                    train_loss += loss.detach().item()
+                    coarse_optim.zero_grad()
+
+                    if i >= self.coarse_batches:
+                        k_iter += int(ceil(self.coarse_batches / 2))
+                        break
+
+                # update top level weights
+                def closure_full_grad():
+                    loss = 0
+                    for data in tqdm(
+                        self.validloader,
+                        desc=f"Epoch: {epoch:03}",
+                        dynamic_ncols=True,
+                        disable=self.quiet,
+                    ):
+                        data.to(self.device)
+
+                        out, y = self.model(**get_data(data))
+                        loss = loss + self.model.loss(out, y)["loss"]
+                    return loss
+
+                optimizer.update_weights(closure_full_grad)
 
             # Preconditioning step
 

@@ -3,7 +3,7 @@ import re
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
-from torch_geometric.nn import radius_graph
+from torch_geometric.nn import avg_pool, graclus, radius_graph
 from torch_geometric.utils import to_scipy_sparse_matrix
 
 from graclus import graclus_kway
@@ -94,6 +94,18 @@ def get_data(
             for k in ["x", "y"]
         },
     }
+
+
+def coarsen_graph(data: Data, level=1):
+    for _ in range(level):
+        if data.edge_index is None:
+            data = Data(**get_data(data))
+        cluster = graclus(data.edge_index, num_nodes=data.num_nodes)  # type: ignore
+        # reindex cluster ids
+        _, cluster = torch.unique(cluster, return_inverse=True)
+
+        data = avg_pool(cluster, data)
+    return data
 
 
 def position_transform(data: Data) -> Data:

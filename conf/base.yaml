@@ -32,3 +32,4 @@ epochs: 100
 
 # Adagrad
 full_batches: all
+coarse_batches: 0

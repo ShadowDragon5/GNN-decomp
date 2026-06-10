@@ -101,6 +101,27 @@ class DD_Adagrad(torch.optim.Optimizer):
         return theta1, theta2
 
     @torch.no_grad()
+    def update_weights(self, closure: Callable) -> None:
+        group = self.param_groups[0]
+        w_lk = group["w_lk"].to(self.device)
+
+        with torch.enable_grad():
+            loss = closure()
+            gradient = torch.autograd.grad(
+                loss,
+                self._params,
+                create_graph=True,
+            )
+            grad_flat = flatten(gradient).to(self.device)
+
+        group["gradient"] = grad_flat
+
+        w_new = (grad_flat**2 + w_lk**2).sqrt()
+        # delta = grad_flat.abs() / w_new
+
+        group["w_lk"] = w_new
+
+    @torch.no_grad()
     def step(self, closure: Callable):  # type: ignore[override]
         """
         Perform a single optimization step to update parameter.
@@ -142,7 +163,6 @@ class DD_Adagrad(torch.optim.Optimizer):
         s_lk = torch.clamp(-grad_flat, -delta, delta)
 
         # Taylor step
-        # FIXME: check for tolerances
         with torch.enable_grad():
             grad_dot_s = grad_flat @ s_lk
             hvp = torch.autograd.grad(grad_dot_s, self._params, retain_graph=True)
