@@ -36,7 +36,7 @@ from utils import (
     get_data,
     init_weights,
     normalization_transform,
-    partition_data_points,
+    partition_data_points_morton,
     partition_transform_global,
     position_transform,
 )
@@ -288,7 +288,7 @@ def main(cfg: DictConfig):
                     ),
                     task="scarce",
                     train=True,
-                    pre_transform=lambda data: partition_data_points(
+                    pre_transform=lambda data: partition_data_points_morton(
                         position_transform(
                             normalization_transform(data, mean_x, std_x, mean_y, std_y)
                         ),
@@ -382,6 +382,7 @@ def main(cfg: DictConfig):
         # "full_epochs": cfg.full_epochs,
         "full_batches": cfg.full_batches,
         "coarse_batches": cfg.coarse_batches,
+        "coarse_level": cfg.coarse_level,
         "pre_lr": cfg.model.pre_lr,
         "pre_wd": cfg.model.pre_wd,
         "optim_params": cfg.optim_params,

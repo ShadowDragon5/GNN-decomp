@@ -3,7 +3,8 @@ import re
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
-from torch_geometric.nn import avg_pool, graclus, radius_graph
+from torch_geometric.nn import graclus, radius_graph
+from torch_geometric.nn.pool import avg_pool
 from torch_geometric.utils import to_scipy_sparse_matrix
 
 from graclus import graclus_kway
@@ -91,12 +92,13 @@ def get_data(
         "edge_index": edge_index,
         **{
             k: wrapped_get(k)[idx]  # type: ignore
-            for k in ["x", "y"]
+            for k in ["x", "y", "pos"]
         },
     }
 
 
 def coarsen_graph(data: Data, level=1):
+    data.to("cpu")  # HACK: graclus hangs on GPU
     for _ in range(level):
         if data.edge_index is None:
             data = Data(**get_data(data))
@@ -170,7 +172,7 @@ def partition_transform_global(data: Data, num_parts: int = 2):
     return PartitionedData(batch=data.batch, **subgraphs)
 
 
-def partition_data_points(data: Data, num_parts: int = 2):
+def partition_data_points_graclus(data: Data, num_parts: int = 2):
     assert data.x is not None
     assert data.pos is not None
 
@@ -186,6 +188,50 @@ def partition_data_points(data: Data, num_parts: int = 2):
 
     subgraphs = dict()
     for i in range(num_parts):
+        G = data.subgraph(clusters == i)
+        subgraphs[f"x_{i}"] = G.x
+        subgraphs[f"pos_{i}"] = G.pos
+        subgraphs[f"y_{i}"] = G.y
+
+    return PartitionedData(batch=data.batch, **subgraphs)
+
+
+def morton_partition(pos, num_parts):
+    N = pos.size(0)
+
+    mins = pos.min(0).values
+    maxs = pos.max(0).values
+
+    x = ((pos[:, 0] - mins[0]) / (maxs[0] - mins[0] + 1e-12) * 1024).long()
+    y = ((pos[:, 1] - mins[1]) / (maxs[1] - mins[1] + 1e-12) * 1024).long()
+
+    code = torch.zeros_like(x)
+    for i in range(10):
+        code |= ((x >> i) & 1) << (2 * i)
+        code |= ((y >> i) & 1) << (2 * i + 1)
+
+    perm = torch.argsort(code)
+
+    # balanced slicing
+    splits = torch.linspace(0, N, num_parts + 1).long()
+
+    labels = torch.empty(N, dtype=torch.long, device=pos.device)
+
+    for i in range(num_parts):
+        labels[perm[splits[i] : splits[i + 1]]] = i
+
+    return labels
+
+
+def partition_data_points_morton(data: Data, num_parts: int = 2):
+    assert data.x is not None
+    assert data.pos is not None
+
+    clusters = morton_partition(data.pos, num_parts)
+
+    subgraphs = dict()
+    for i in range(num_parts):
+        print((clusters == i).sum())
         G = data.subgraph(clusters == i)
         subgraphs[f"x_{i}"] = G.x
         subgraphs[f"pos_{i}"] = G.pos

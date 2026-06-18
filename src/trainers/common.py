@@ -20,13 +20,13 @@ class GAMMA_ALGO(StrEnum):
     BACKTRACKING = auto()
     BRENT = auto()
     SGD = "SGD"
+    COBYLA = auto()
 
 
 class WEIGHTING_STRATEGY(StrEnum):
     """Gamma function used for combining weighting the contributions"""
 
     DIRECT = auto()
-    CLIPPED = auto()
     INVERSE = auto()
 
 
@@ -197,13 +197,15 @@ def parameter_dot(grad: dict, params: dict) -> float:
 
 
 def build_model(gamma_strat: WEIGHTING_STRATEGY, theta, gammas, contributions):
+    """
+    theta: model parameters, are consumed(overridden) and returned
+    gammas: list of weights
+    contributions: list of contributions to be applied with corresponding weight
+    """
+
     def weigthing_strategy(a, b, l, i):
         match gamma_strat:
             case WEIGHTING_STRATEGY.DIRECT:
-                return a + gammas[i] * b
-            case WEIGHTING_STRATEGY.CLIPPED:
-                if l >= 4 * 2:  # weight + bias
-                    return (a + gammas[i] * b).detach()
                 return a + gammas[i] * b
             case WEIGHTING_STRATEGY.INVERSE:
                 base = 2

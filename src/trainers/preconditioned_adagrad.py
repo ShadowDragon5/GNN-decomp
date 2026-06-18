@@ -3,9 +3,10 @@ from copy import deepcopy
 from typing import Any
 
 import mlflow
-import pandas as pd
+import numpy as np
 import torch
 from numpy import ceil
+from scipy.optimize import NonlinearConstraint, minimize
 from torch.func import functional_call
 from torch.optim.optimizer import StateDict
 from torch_geometric.loader import DataLoader
@@ -34,6 +35,7 @@ class Preconditioned_Adagrad(Trainer):
         pre_epochs: int,
         full_batches: str | int,
         coarse_batches: int,
+        coarse_level: int,
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
@@ -51,6 +53,7 @@ class Preconditioned_Adagrad(Trainer):
         self.pre_steps = pre_epochs  # steps over partitioned graph data
         self.full_batches = full_batches
         self.coarse_batches = coarse_batches
+        self.coarse_level = coarse_level
         self.part_trainloader = part_trainloader
         self.num_parts = num_parts
         self.gamma_algo = gamma_algo
@@ -117,9 +120,11 @@ class Preconditioned_Adagrad(Trainer):
         self.model.to(self.device)
         optimizer = DD_Adagrad(self.model.parameters(), **self.optim_params)
         if isinstance(self.full_batches, int):
-            trainloader = cycle(self.trainloader)
+            full_batches = self.full_batches
         else:
-            trainloader = self.trainloader
+            full_batches = len(self.trainloader)
+
+        trainloader = cycle(self.trainloader)
 
         valid_loss = defaultdict(float)
         k_iter = 0
@@ -130,37 +135,51 @@ class Preconditioned_Adagrad(Trainer):
 
             optimizer.zero_grad()
 
-            for i, data in enumerate(
-                tqdm(
-                    trainloader,
-                    desc=f"Epoch: {epoch:03}",
-                    dynamic_ncols=True,
-                    disable=self.quiet,
-                    total=self.full_batches
-                    if isinstance(self.full_batches, int)
-                    else None,
-                ),
-                start=1,
-            ):
-                data.to(self.device)
+            # skip full graph
+            if full_batches == 0:
+                # update top level weights
+                def closure_full_grad():
+                    loss = 0
+                    for data in tqdm(
+                        self.targetloader,
+                        desc=f"Epoch: {epoch:03}",
+                        dynamic_ncols=True,
+                        disable=self.quiet,
+                    ):
+                        data.to(self.device)
 
-                def closure():
-                    out, y = self.model(**get_data(data))
-                    return self.model.loss(out, y)["loss"]
+                        out, y = self.model(**get_data(data))
+                        loss = loss + self.model.loss(out, y)["loss"]
+                    return loss
 
-                loss = optimizer.step(closure)
-                k_iter += 1
-                train_loss += loss.detach().item()
-                optimizer.zero_grad()
+                optimizer.update_weights(closure_full_grad)
 
-                if isinstance(self.full_batches, int) and i >= self.full_batches:
-                    break
+            else:
+                for i, data in enumerate(
+                    tqdm(
+                        trainloader,
+                        desc=f"Epoch: {epoch:03}",
+                        dynamic_ncols=True,
+                        disable=self.quiet,
+                        total=full_batches,
+                    ),
+                    start=1,
+                ):
+                    data.to(self.device)
 
-            train_loss /= (
-                self.full_batches
-                if isinstance(self.full_batches, int)
-                else len(self.trainloader)
-            )
+                    def closure():
+                        out, y = self.model(**get_data(data))
+                        return self.model.loss(out, y)["loss"]
+
+                    loss = optimizer.step(closure)
+                    k_iter += 1
+                    train_loss += loss.detach().item()
+                    optimizer.zero_grad()
+
+                    if i >= full_batches:
+                        break
+
+                train_loss /= full_batches
 
             # Validation
             valid_loss = self.validate(self.model)
@@ -196,9 +215,9 @@ class Preconditioned_Adagrad(Trainer):
                     ),
                     start=1,
                 ):
-                    data.to(self.device)
-                    coarse_data = coarsen_graph(data)
+                    coarse_data = coarsen_graph(data, level=self.coarse_level)
                     coarse_data.y = data.y
+                    coarse_data.to(self.device)  # type: ignore
 
                     def closure():
                         out, y = self.model(**get_data(coarse_data))
@@ -216,7 +235,7 @@ class Preconditioned_Adagrad(Trainer):
                 def closure_full_grad():
                     loss = 0
                     for data in tqdm(
-                        self.validloader,
+                        self.targetloader,
                         desc=f"Epoch: {epoch:03}",
                         dynamic_ncols=True,
                         disable=self.quiet,
@@ -244,9 +263,11 @@ class Preconditioned_Adagrad(Trainer):
             k_iter += int(ceil(self.pre_steps / self.num_parts))
 
             # Contribution combination
+            # TODO: add computational cost to k_iter
             if self.gamma_algo == GAMMA_ALGO.SGD:
-                # FIXME: this adds cost and needs clamping
                 gammas = self.optimize_gammas(contributions, epoch)  # model.eval()
+            elif self.gamma_algo == GAMMA_ALGO.COBYLA:
+                gammas = self.constrained_optmization(contributions)
             else:
                 gammas = [1 / self.num_parts] * self.num_parts
 
@@ -271,10 +292,10 @@ class Preconditioned_Adagrad(Trainer):
 
         return valid_loss["loss"]
 
-    def optimize_gammas(self, contributions, global_epoch):
+    def optimize_gammas(self, contributions, global_epoch) -> np.ndarray:
         """Does a mini optimization to find the best gamma combination"""
 
-        N_EPOCHS = 1000
+        N_EPOCHS = 100
         EPS = 1e-8  # to prevent INVERSE inf derivative at 0
         gammas = torch.full([self.num_parts], EPS, requires_grad=True)
         # gammas = torch.ones(self.num_parts, requires_grad=True)
@@ -348,9 +369,60 @@ class Preconditioned_Adagrad(Trainer):
             if es.step(valid_loss):
                 break
 
-        path = f"results/{mlflow.active_run().info.run_id}_gamma_history_{global_epoch:03}.csv"  # type: ignore
-        df = pd.DataFrame(gamma_history)
-        df.to_csv(path)
-        mlflow.log_artifact(path)
+        # path = f"results/{mlflow.active_run().info.run_id}_gamma_history_{global_epoch:03}.csv"  # type: ignore
+        # df = pd.DataFrame(gamma_history)
+        # df.to_csv(path)
+        # mlflow.log_artifact(path)
 
         return gammas.detach().cpu().numpy()
+
+    def constrained_optmization(self, contributions) -> np.ndarray:
+        gammas = np.full(self.num_parts, 1 / self.num_parts)
+
+        self.model.eval()
+        params = {}
+        buffers = {}
+        for key, val in self.model.state_dict().items():
+            if key in dict(self.model.named_buffers()):
+                buffers[key] = val.clone()
+            else:
+                params[key] = val.clone()
+
+        def eval_contrib(gammas):
+            theta = deepcopy(params)
+            theta = build_model(self.gamma_strat, theta, gammas, contributions)
+
+            total_loss = 0
+            for data in tqdm(
+                self.targetloader,
+                desc="Gamma optim.",
+                dynamic_ncols=True,
+                leave=False,
+                disable=self.quiet,
+            ):
+                data.to(self.device)
+
+                out, y = functional_call(
+                    self.model, (theta, buffers), kwargs=get_data(data)
+                )
+                loss = self.model.loss(out, y)["loss"]
+                total_loss += loss.detach().item()
+
+            return total_loss
+
+        contstraints = [
+            NonlinearConstraint(
+                lambda weights: abs(weights[i]) + abs(weights[i + 1]), lb=0.0, ub=1.0
+            )
+            for i in range(self.num_parts - 1)
+        ]
+
+        solution = minimize(
+            eval_contrib,
+            gammas,
+            constraints=contstraints,
+            method="cobyla",
+            options={"maxiter": 50},
+        )
+
+        return solution["x"]
