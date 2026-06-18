@@ -138,21 +138,13 @@ class Preconditioned_Adagrad(Trainer):
             # skip full graph
             if full_batches == 0:
                 # update top level weights
-                def closure_full_grad():
-                    loss = 0
-                    for data in tqdm(
-                        self.targetloader,
-                        desc=f"Epoch: {epoch:03}",
-                        dynamic_ncols=True,
-                        disable=self.quiet,
-                    ):
-                        data.to(self.device)
+                def grad_closure():
+                    data = next(iter(self.trainloader))
+                    data.to(self.device)
+                    out, y = self.model(**get_data(data))
+                    return self.model.loss(out, y)["loss"]
 
-                        out, y = self.model(**get_data(data))
-                        loss = loss + self.model.loss(out, y)["loss"]
-                    return loss
-
-                optimizer.update_weights(closure_full_grad)
+                optimizer.update_weights(grad_closure)
 
             else:
                 for i, data in enumerate(
@@ -232,21 +224,13 @@ class Preconditioned_Adagrad(Trainer):
                         break
 
                 # update top level weights
-                def closure_full_grad():
-                    loss = 0
-                    for data in tqdm(
-                        self.targetloader,
-                        desc=f"Epoch: {epoch:03}",
-                        dynamic_ncols=True,
-                        disable=self.quiet,
-                    ):
-                        data.to(self.device)
+                def grad_closure():
+                    data = next(iter(self.trainloader))
+                    data.to(self.device)
+                    out, y = self.model(**get_data(data))
+                    return self.model.loss(out, y)["loss"]
 
-                        out, y = self.model(**get_data(data))
-                        loss = loss + self.model.loss(out, y)["loss"]
-                    return loss
-
-                optimizer.update_weights(closure_full_grad)
+                optimizer.update_weights(grad_closure)
 
             # Preconditioning step
 
