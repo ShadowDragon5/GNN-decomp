@@ -208,7 +208,6 @@ class Preconditioned_Adagrad(Trainer):
                     start=1,
                 ):
                     coarse_data = coarsen_graph(data, level=self.coarse_level)
-                    coarse_data.y = data.y
                     coarse_data.to(self.device)  # type: ignore
 
                     def closure():
@@ -220,7 +219,9 @@ class Preconditioned_Adagrad(Trainer):
                     coarse_optim.zero_grad()
 
                     if i >= self.coarse_batches:
-                        k_iter += int(ceil(self.coarse_batches / 2))
+                        k_iter += int(
+                            ceil(self.coarse_batches / 2 ** (self.coarse_level))
+                        )
                         break
 
                 # update top level weights

@@ -63,7 +63,7 @@ class GraphSAGE(GNN):
         # MLP decoder
         self.decoder = MLP([8, 64, 64, 4])
 
-    def forward(self, x, y, edge_index):
+    def forward(self, x, y, edge_index, **_):
         z = self.encoder(x)
 
         z = self.conv(z, edge_index)

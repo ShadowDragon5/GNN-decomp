@@ -5,6 +5,7 @@ from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
 from torch_geometric.nn import graclus, radius_graph
 from torch_geometric.nn.pool import avg_pool
+from torch_geometric.nn.pool.avg_pool import _avg_pool_x
 from torch_geometric.utils import to_scipy_sparse_matrix
 
 from graclus import graclus_kway
@@ -76,6 +77,13 @@ def get_data(
     # sample points
     n = pos.size(0)
     sampleN = 32000
+
+    if isinstance(data, PartitionedData):
+        for j in range(6):
+            if data.get("x", j, device) is None:
+                break
+        sampleN //= j  # type: ignore
+
     if n <= sampleN:
         idx = torch.arange(n, device=device)
     else:
@@ -92,7 +100,7 @@ def get_data(
         "edge_index": edge_index,
         **{
             k: wrapped_get(k)[idx]  # type: ignore
-            for k in ["x", "y", "pos"]
+            for k in ["x", "y"]
         },
     }
 
@@ -106,7 +114,16 @@ def coarsen_graph(data: Data, level=1):
         # reindex cluster ids
         _, cluster = torch.unique(cluster, return_inverse=True)
 
+        # pool labels if they are per node
+        assert isinstance(data.y, torch.Tensor)
+        y = (
+            data.y
+            if data.y.shape[0] != data.x.shape[0]  # type: ignore
+            else _avg_pool_x(cluster, data.y)
+        )
         data = avg_pool(cluster, data)
+        data.y = y
+
     return data
 
 
@@ -231,7 +248,6 @@ def partition_data_points_morton(data: Data, num_parts: int = 2):
 
     subgraphs = dict()
     for i in range(num_parts):
-        print((clusters == i).sum())
         G = data.subgraph(clusters == i)
         subgraphs[f"x_{i}"] = G.x
         subgraphs[f"pos_{i}"] = G.pos
