@@ -1,6 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any
+from typing import Any, Callable
 
 import mlflow
 import numpy as np
@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from models.common import GNN
 from optimizers.dd_adagrad import DD_Adagrad
-from utils import coarsen_graph, get_data
+from utils import get_data
 
 from .common import (
     GAMMA_ALGO,
@@ -36,6 +36,7 @@ class Preconditioned_Adagrad(Trainer):
         full_batches: str | int,
         coarse_batches: int,
         coarse_level: int,
+        coarse_fn: Callable,
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
@@ -54,6 +55,7 @@ class Preconditioned_Adagrad(Trainer):
         self.full_batches = full_batches
         self.coarse_batches = coarse_batches
         self.coarse_level = coarse_level
+        self.coarse_fn = coarse_fn
         self.part_trainloader = part_trainloader
         self.num_parts = num_parts
         self.gamma_algo = gamma_algo
@@ -207,7 +209,7 @@ class Preconditioned_Adagrad(Trainer):
                     ),
                     start=1,
                 ):
-                    coarse_data = coarsen_graph(data, level=self.coarse_level)
+                    coarse_data = self.coarse_fn(data, level=self.coarse_level)
                     coarse_data.to(self.device)  # type: ignore
 
                     def closure():

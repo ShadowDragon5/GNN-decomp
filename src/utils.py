@@ -105,7 +105,7 @@ def get_data(
     }
 
 
-def coarsen_graph(data: Data, level=1):
+def coarsen_graph_avg(data: Data, level=1) -> Data:
     data.to("cpu")  # HACK: graclus hangs on GPU
     for _ in range(level):
         if data.edge_index is None:
@@ -123,6 +123,30 @@ def coarsen_graph(data: Data, level=1):
         )
         data = avg_pool(cluster, data)
         data.y = y
+
+    return data
+
+
+def coarsen_graph_airfrans(data: Data, level=1, radius=0.05) -> Data:
+    assert data.num_nodes is not None
+    assert data.pos is not None
+    assert isinstance(data.x, torch.Tensor)
+    assert isinstance(data.y, torch.Tensor)
+
+    n = data.num_nodes // (2**level)
+    idx = torch.multinomial(torch.ones(data.num_nodes), n)
+
+    edge_index = radius_graph(
+        x=data.pos[idx],
+        r=radius,
+        loop=True,
+        max_num_neighbors=64,
+    )
+
+    data.num_nodes = n
+    data.edge_index = edge_index
+    data.x = data.x[idx]
+    data.y = data.y[idx]
 
     return data
 
