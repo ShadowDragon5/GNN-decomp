@@ -34,8 +34,7 @@ from trainers import (
     Trainer,
 )
 from utils import (
-    coarsen_graph_airfrans,
-    coarsen_graph_avg,
+    coarsen_graph_random,
     get_data,
     init_weights,
     normalization_transform,
@@ -386,9 +385,7 @@ def main(cfg: DictConfig):
         "full_batches": cfg.full_batches,
         "coarse_batches": cfg.coarse_batches,
         "coarse_level": cfg.coarse_level,
-        "coarse_fn": coarsen_graph_avg
-        if cfg.dataset == DS.CIFAR10
-        else partial(coarsen_graph_airfrans, radius=0.1),
+        "coarse_fn": partial(coarsen_graph_random, radius=0.05),
         "pre_lr": cfg.model.pre_lr,
         "pre_wd": cfg.model.pre_wd,
         "optim_params": cfg.optim_params,

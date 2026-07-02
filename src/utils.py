@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import graclus, radius_graph
 from torch_geometric.nn.pool import avg_pool
 from torch_geometric.nn.pool.avg_pool import _avg_pool_x
-from torch_geometric.utils import to_scipy_sparse_matrix
+from torch_geometric.utils import subgraph, to_scipy_sparse_matrix
 
 from graclus import graclus_kway
 
@@ -127,28 +127,42 @@ def coarsen_graph_avg(data: Data, level=1) -> Data:
     return data
 
 
-def coarsen_graph_airfrans(data: Data, level=1, radius=0.05) -> Data:
+def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
     assert data.num_nodes is not None
     assert data.pos is not None
     assert isinstance(data.x, torch.Tensor)
     assert isinstance(data.y, torch.Tensor)
 
-    n = 32000 // (2**level)
-    idx = torch.multinomial(torch.ones(data.num_nodes, device=data.x.device), n)
+    # AirfRANS
+    if data.edge_index is None:
+        n = 32000 // (2**level)
+        idx = torch.multinomial(torch.ones(data.num_nodes, device=data.x.device), n)
+        edge_index = radius_graph(
+            x=data.pos[idx],
+            r=radius,
+            loop=True,
+            max_num_neighbors=64,
+        )
+        new_y = data.y[idx]
 
-    edge_index = radius_graph(
-        x=data.pos[idx],
-        r=radius,
-        loop=True,
-        max_num_neighbors=64,
+    else:
+        n = data.num_nodes // (2**level)
+        idx = torch.randperm(data.num_nodes, device=data.x.device)[:n]
+        edge_index, _ = subgraph(
+            subset=idx,
+            edge_index=data.edge_index,
+            edge_attr=getattr(data, "edge_attr", None),
+            relabel_nodes=True,
+        )
+        new_y = data.y
+
+    return Data(
+        num_nodes=n,
+        edge_index=edge_index,
+        x=data.x[idx],
+        y=new_y,
+        batch=data.batch[idx],  # type: ignore
     )
-
-    data.num_nodes = n
-    data.edge_index = edge_index
-    data.x = data.x[idx]
-    data.y = data.y[idx]
-
-    return data
 
 
 def position_transform(data: Data) -> Data:
