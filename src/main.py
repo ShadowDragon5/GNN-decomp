@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum, auto
+from functools import partial
 from logging import warning
 from os import makedirs
 from pathlib import Path
@@ -387,7 +388,7 @@ def main(cfg: DictConfig):
         "coarse_level": cfg.coarse_level,
         "coarse_fn": coarsen_graph_avg
         if cfg.dataset == DS.CIFAR10
-        else coarsen_graph_airfrans,
+        else partial(coarsen_graph_airfrans, radius=0.1),
         "pre_lr": cfg.model.pre_lr,
         "pre_wd": cfg.model.pre_wd,
         "optim_params": cfg.optim_params,

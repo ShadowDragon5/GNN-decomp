@@ -133,8 +133,8 @@ def coarsen_graph_airfrans(data: Data, level=1, radius=0.05) -> Data:
     assert isinstance(data.x, torch.Tensor)
     assert isinstance(data.y, torch.Tensor)
 
-    n = data.num_nodes // (2**level)
-    idx = torch.multinomial(torch.ones(data.num_nodes), n)
+    n = 32000 // (2**level)
+    idx = torch.multinomial(torch.ones(data.num_nodes, device=data.x.device), n)
 
     edge_index = radius_graph(
         x=data.pos[idx],
