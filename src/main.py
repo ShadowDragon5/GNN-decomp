@@ -14,13 +14,15 @@ import numpy as np
 import torch
 from mlflow.pytorch import log_model
 from omegaconf import DictConfig
+from torch.utils.data import random_split
 from torch_geometric.data import Data, Dataset
 from torch_geometric.datasets import AirfRANS, GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import to_networkx
+from torch_geometric_temporal import METRLADatasetLoader
 
 from data import wave_data_2D_irrgular
-from models import GCN_CG, GCN_CN, GraphSAGE, MeshGraphNet
+from models import GCN_CG, GCN_CN, DCRNNModel, GraphSAGE, MeshGraphNet
 from models.common import GNN
 from trainers import (
     GAMMA_ALGO,
@@ -34,6 +36,7 @@ from trainers import (
     Trainer,
 )
 from utils import (
+    METRLADataset,
     coarsen_graph_random,
     get_data,
     init_weights,
@@ -49,6 +52,7 @@ MODELS = {
     # "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
     "MeshGraphNet": MeshGraphNet,
     "GraphSAGE": GraphSAGE,
+    "DCRNNModel": DCRNNModel,
 }
 
 TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
@@ -96,6 +100,7 @@ class DS(StrEnum):
     PATTERN = auto()
     Wave2D = auto()
     AirfRANS = auto()
+    METR_LA = auto()
 
 
 # Normalization variables
@@ -221,7 +226,13 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
 
             testset = validset
 
-    return trainset, validset, testset
+        case DS.METR_LA:
+            root_str = str(root / "METR_LA")
+            dataset = METRLADataset(METRLADatasetLoader(root_str).get_dataset())
+
+            trainset, validset, testset = random_split(dataset, [0.6, 0.2, 0.2])
+
+    return trainset, validset, testset  # type: ignore
 
 
 @hydra.main(version_base=None, config_path="../conf")
@@ -314,10 +325,18 @@ def main(cfg: DictConfig):
                     ),
                     force_reload=cfg.u,
                 )
+
+            case DS.METR_LA:
+                root_str = str(dataset_dir / "METR_LA")
+                partset = METRLADataset(
+                    METRLADatasetLoader(root_str).get_dataset(),
+                    num_parts=cfg.partitions,
+                )
+
         assert partset is not None
 
         part_trainloader = DataLoader(
-            partset,
+            partset,  # type: ignore
             batch_size=cfg.dev.batch,
             shuffle=True,
             # NOTE: results in x_0_batch
@@ -409,8 +428,9 @@ def main(cfg: DictConfig):
         else None
     )
 
+    item = next(iter(trainloader))
     model: GNN = MODELS[cfg.model.base](
-        in_dim=trainset.num_features,
+        in_dim=item.x.shape[1],
         hidden_dim=cfg.model.hidden_dim,
         out_dim=cfg.model.out_dim,
         edge_dim=3,
@@ -466,7 +486,7 @@ def main(cfg: DictConfig):
             ll_resolution=cfg.ll_resolution,
             gamma_lr=cfg.gamma_lr,
             gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
-            scheduler=SCHEDULERS[cfg.model.base],
+            scheduler=SCHEDULERS.get(cfg.model.base),
             **trainer_params,
         )
         trainer.run()

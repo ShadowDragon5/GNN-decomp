@@ -43,7 +43,8 @@ class Trainer(ABC):
         scheduler: Callable[
             [torch.optim.Optimizer, float, int],
             torch.optim.lr_scheduler.LRScheduler,
-        ],
+        ]
+        | None,
         device: torch.device,
         epochs: int,
         lr: float,

@@ -1,0 +1,13 @@
+defaults:
+  - metrla_base
+  - _self_
+
+name: METR
+trainer: pre-adagrad
+full_batches: all
+use_norms: false
+partitions: 2
+pre_epochs: 322
+
+ASM: true
+gamma_algo: none

@@ -2,6 +2,7 @@ import re
 
 import torch
 from sklearn.cluster import spectral_clustering
+from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.nn import graclus, radius_graph
 from torch_geometric.nn.pool import avg_pool
@@ -39,6 +40,61 @@ class PartitionedData(Data):
 
 
 torch.serialization.add_safe_globals([PartitionedData])
+
+
+class METRLADataset(Dataset):
+    def __init__(self, temporal_dataset, num_parts=1):
+        self.snapshots = list(temporal_dataset)
+
+        self.partitions = (
+            None
+            if num_parts == 1
+            else self._partition_graph(
+                self.snapshots[0],
+                num_parts,
+            )
+        )
+
+    def __len__(self):
+        return len(self.snapshots)
+
+    def __getitem__(self, idx):
+        data = self.snapshots[idx]
+        data.num_nodes = data.x.shape[0]
+
+        if self.partitions is None:
+            return data
+
+        return self._apply_partition(
+            data,
+            self.partitions,
+        )
+
+    @staticmethod
+    def _partition_graph(data, num_parts):
+        # Spectral
+        # A = to_scipy_sparse_matrix(data.edge_index, num_nodes=data.x.shape[0])
+        # labels = spectral_clustering(A, n_clusters=num_parts)
+
+        # Graclus
+        data.num_nodes = data.x.shape[0]
+        labels = graclus_kway(data, num_parts)
+
+        return [torch.tensor(labels == i) for i in range(num_parts)]
+
+    @staticmethod
+    def _apply_partition(data, partitions):
+        subgraphs = {}
+
+        for i, mask in enumerate(partitions):
+            G = data.subgraph(mask)
+
+            subgraphs[f"x_{i}"] = G.x
+            subgraphs[f"edge_index_{i}"] = G.edge_index
+            subgraphs[f"edge_attr_{i}"] = G.edge_attr
+            subgraphs[f"y_{i}"] = G.y
+
+        return PartitionedData(**subgraphs)
 
 
 def get_data(
@@ -129,12 +185,12 @@ def coarsen_graph_avg(data: Data, level=1) -> Data:
 
 def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
     assert data.num_nodes is not None
-    assert data.pos is not None
     assert isinstance(data.x, torch.Tensor)
     assert isinstance(data.y, torch.Tensor)
 
     # AirfRANS
     if data.edge_index is None:
+        assert data.pos is not None
         n = 32000 // (2**level)
         idx = torch.multinomial(torch.ones(data.num_nodes, device=data.x.device), n)
         edge_index = radius_graph(
@@ -154,7 +210,10 @@ def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
             edge_attr=getattr(data, "edge_attr", None),
             relabel_nodes=True,
         )
-        new_y = data.y
+        if data.y.dim() == 1:
+            new_y = data.y
+        else:
+            new_y = data.y[idx]
 
     return Data(
         num_nodes=n,
@@ -190,12 +249,6 @@ def normalization_transform(data: Data, mean_x, std_x, mean_y, std_y) -> Data:
         edge_index=data.edge_index,
         batch=data.batch,
     )
-
-
-def part_to_data(x, y, A) -> Data:
-    adj = torch.transpose(A, -2, -1)
-    index = adj.nonzero(as_tuple=True)
-    return Data(x=x, y=y, edge_index=torch.stack(index, 0))
 
 
 def partition_transform_global(data: Data, num_parts: int = 2):
