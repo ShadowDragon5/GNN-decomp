@@ -8,7 +8,7 @@ import math
 import torch
 from sklearn.cluster import spectral_clustering
 from torch_geometric.data import Data
-from torch_geometric.nn import graclus, max_pool
+from torch_geometric.nn.pool import graclus, max_pool
 from torch_geometric.utils import to_scipy_sparse_matrix
 
 
@@ -72,7 +72,11 @@ def graclus_kway(data: Data, parts: int, refine_iters=5):
 
     # 1. Coarsen
     for _ in range(num_levels):
-        cluster = graclus(data.edge_index, num_nodes=data.num_nodes)  # type: ignore
+        cluster = graclus(
+            data.edge_index,  # type: ignore
+            weight=data.edge_attr,
+            num_nodes=data.num_nodes,
+        )
 
         # reindex cluster ids
         _, cluster = torch.unique(cluster, return_inverse=True)

@@ -80,7 +80,7 @@ class METRLADataset(Dataset):
         data.num_nodes = data.x.shape[0]
         labels = graclus_kway(data, num_parts)
 
-        return [torch.tensor(labels == i) for i in range(num_parts)]
+        return [(labels == i).detach().clone() for i in range(num_parts)]
 
     @staticmethod
     def _apply_partition(data, partitions):
