@@ -37,6 +37,8 @@ class Preconditioned_Adagrad(Trainer):
         coarse_batches: int,
         coarse_level: int,
         coarse_fn: Callable,
+        use_coarse_moment: bool,
+        after_steps: int,
         part_trainloader: DataLoader,
         num_parts: int,
         gamma_algo: GAMMA_ALGO,
@@ -56,6 +58,8 @@ class Preconditioned_Adagrad(Trainer):
         self.coarse_batches = coarse_batches
         self.coarse_level = coarse_level
         self.coarse_fn = coarse_fn
+        self.use_coarse_moment = use_coarse_moment
+        self.after_steps = after_steps
         self.part_trainloader = part_trainloader
         self.num_parts = num_parts
         self.gamma_algo = gamma_algo
@@ -66,6 +70,8 @@ class Preconditioned_Adagrad(Trainer):
         self.gamma_lr = gamma_lr
         self.gamma_strat = gamma_strat
         self.optim_params = optim_params
+
+        # self.pre_moment = [None] * num_parts
 
         if target == "train":
             self.targetloader = self.trainloader
@@ -88,6 +94,9 @@ class Preconditioned_Adagrad(Trainer):
         weights_0 = deepcopy(model_g.state_dict())
 
         optimizer = DD_Adagrad(model.parameters(), higher_state, **self.optim_params)
+
+        # if self.pre_moment[i] is not None:
+        #     optimizer.param_groups[0]["moment"] = torch.clone(self.pre_moment[i])
 
         model.train()
 
@@ -167,25 +176,11 @@ class Preconditioned_Adagrad(Trainer):
 
                     loss = optimizer.step(closure)
                     k_iter += 1
-                    train_loss += loss.detach().item()
+                    train_loss += loss.detach().item() / full_batches
                     optimizer.zero_grad()
 
                     if i >= full_batches:
                         break
-
-                train_loss /= full_batches
-
-            # Validation
-            valid_loss = self.validate(self.model)
-
-            if not self.quiet:
-                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
-
-            mlflow.log_metrics(
-                {"train/loss": train_loss}
-                | {f"validate/{k}": v for k, v in valid_loss.items()},
-                step=k_iter,
-            )
 
             # mlflow.log_metrics(
             #     {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
@@ -226,6 +221,12 @@ class Preconditioned_Adagrad(Trainer):
                         )
                         break
 
+                # copy over the coarse step moments
+                if self.use_coarse_moment:
+                    optimizer.param_groups[0]["moment"] = coarse_optim.param_groups[0][
+                        "moment"
+                    ]
+
                 # update top level weights
                 def grad_closure():
                     data = next(iter(self.trainloader))
@@ -234,6 +235,44 @@ class Preconditioned_Adagrad(Trainer):
                     return self.model.loss(out, y)["loss"]
 
                 optimizer.update_weights(grad_closure)
+
+                # full graph steps after coarse
+                if self.after_steps > 0:
+                    for i, data in enumerate(
+                        tqdm(
+                            trainloader,
+                            desc=f"Epoch: {epoch:03}",
+                            dynamic_ncols=True,
+                            disable=self.quiet,
+                            total=self.after_steps,
+                        ),
+                        start=1,
+                    ):
+                        data.to(self.device)
+
+                        def closure():
+                            out, y = self.model(**get_data(data))
+                            return self.model.loss(out, y)["loss"]
+
+                        loss = optimizer.step(closure)
+                        k_iter += 1
+                        train_loss += loss.detach().item() / self.after_steps
+                        optimizer.zero_grad()
+
+                        if i >= self.after_steps:
+                            break
+
+            # Validation
+            valid_loss = self.validate(self.model)
+
+            if not self.quiet:
+                print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
+
+            mlflow.log_metrics(
+                {"train/loss": train_loss}
+                | {f"validate/{k}": v for k, v in valid_loss.items()},
+                step=k_iter,
+            )
 
             # Preconditioning step
 

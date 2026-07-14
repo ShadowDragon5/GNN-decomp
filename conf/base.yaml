@@ -10,6 +10,8 @@ init_model: false
 
 # preconditioner epochs (only for 'pre-' pipelines)
 pre_epochs: 40
+# full graph steps after coarse step
+after_steps: 0
 full_epochs: 1
 target: train
 
@@ -34,3 +36,4 @@ epochs: 100
 full_batches: all
 coarse_batches: 0
 coarse_level: 1
+use_coarse_moment: false
