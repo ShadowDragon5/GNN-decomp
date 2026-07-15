@@ -7,6 +7,7 @@ from torch_geometric.data import Data
 from torch_geometric.nn import graclus, radius_graph
 from torch_geometric.nn.pool import avg_pool
 from torch_geometric.nn.pool.avg_pool import _avg_pool_x
+from torch_geometric.nn.pool.select.topk import topk
 from torch_geometric.utils import subgraph, to_scipy_sparse_matrix
 
 from graclus import graclus_kway
@@ -199,12 +200,19 @@ def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
             loop=True,
             max_num_neighbors=64,
         )
+        edge_attr = None
         new_y = data.y[idx]
 
     else:
-        n = data.num_nodes // (2**level)
-        idx = torch.randperm(data.num_nodes, device=data.x.device)[:n]
-        edge_index, _ = subgraph(
+        if data.batch is not None:
+            scores = torch.rand(data.num_nodes, device=data.x.device)
+            idx = topk(scores, ratio=1 / (2**level), batch=data.batch)
+            n = idx.shape[0]
+        else:
+            n = data.num_nodes // (2**level)
+            idx = torch.randperm(data.num_nodes, device=data.x.device)[:n]
+
+        edge_index, edge_attr = subgraph(
             subset=idx,
             edge_index=data.edge_index,
             edge_attr=getattr(data, "edge_attr", None),
@@ -218,6 +226,7 @@ def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
     return Data(
         num_nodes=n,
         edge_index=edge_index,
+        edge_attr=edge_attr,
         x=data.x[idx],
         y=new_y,
         batch=data.batch[idx],  # type: ignore
