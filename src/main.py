@@ -77,6 +77,12 @@ SCHEDULERS = {
         max_lr=lr,
         total_steps=total_steps,
     ),
+    "DCRNNModel": lambda optim, *_: torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optim,
+        mode="min",
+        factor=0.5,
+        patience=5,
+    ),
 }
 
 # Gamma optimizer

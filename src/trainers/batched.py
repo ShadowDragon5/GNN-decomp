@@ -15,20 +15,25 @@ class Batched(Trainer):
     """
 
     def run(self) -> float:
+        self.model.to(self.device)
         optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, weight_decay=self.wd
+            self.model.parameters(),
+            lr=self.lr,
+            weight_decay=self.wd,
         )
 
         scheduler = self.scheduler(
-            optimizer, self.lr, len(self.trainloader) * self.epochs
+            optimizer,
+            self.lr,
+            len(self.trainloader) * self.epochs,
         )
 
-        self.model.to(self.device)
-
+        k_iter = 0
         valid_loss = defaultdict(float)
         for epoch in range(self.epochs):
             train_loss = 0
             self.model.train()
+            optimizer.zero_grad()
 
             for data in tqdm(
                 self.trainloader,
@@ -48,6 +53,7 @@ class Batched(Trainer):
                 if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
                     scheduler.step()
                 optimizer.zero_grad()
+                k_iter += 1
 
             train_loss /= len(self.trainloader)
 
@@ -65,7 +71,7 @@ class Batched(Trainer):
                     "train/lr": scheduler.get_last_lr()[0],
                     **{f"validate/{k}": v for k, v in valid_loss.items()},
                 },
-                step=epoch,
+                step=k_iter,
             )
 
         if self.need_acc:
