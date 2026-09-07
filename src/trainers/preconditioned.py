@@ -1,7 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
-from enum import StrEnum, auto
-from typing import Any, Callable
+from typing import Any
 
 import mlflow
 import numpy as np
@@ -10,56 +9,22 @@ import torch
 from numpy import ceil
 from scipy.optimize import minimize_scalar
 from torch.func import functional_call
-from torch.linalg import vector_norm
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from models.common import GNN
 from utils import get_data
 
-from .common import EarlyStopping, Trainer
-
-
-class GAMMA_ALGO(StrEnum):
-    """Contribution combination algorithm that determines the gamma weights"""
-
-    NONE = auto()
-    BACKTRACKING = auto()
-    BRENT = auto()
-    SGD = "SGD"
-
-
-class WEIGHTING_STRATEGY(StrEnum):
-    """Gamma function used for combining weighting the contributions"""
-
-    DIRECT = auto()
-    CLIPPED = auto()
-    INVERSE = auto()
-
-
-def apply_to_models(a: dict, fun: Callable, b: dict | None = None, indexed=False):
-    """Apply `fun` to `a` model state dictionary (inplace)"""
-    for l, key in enumerate(reversed(a), start=1):  # L -> 1
-        if a[key].data.dtype == torch.float:
-            if b is None:
-                a[key] = fun(a[key])
-            elif indexed:
-                a[key] = fun(a[key], b[key], l)
-            else:
-                a[key] = fun(a[key], b[key])
-
-
-def parameter_norm(params: dict) -> float:
-    norm = vector_norm(
-        torch.cat([p.view(-1) for p in params.values() if p is not None])
-    )
-    return norm.item()
-
-
-def parameter_dot(grad: dict, params: dict) -> float:
-    a = torch.cat([g.view(-1) for g in grad.values() if g is not None])
-    b = torch.cat([params[k].view(-1) for k in grad.keys() if params[k] is not None])
-    return torch.dot(a, b).item()
+from .common import (
+    GAMMA_ALGO,
+    WEIGHTING_STRATEGY,
+    EarlyStopping,
+    Trainer,
+    apply_to_models,
+    build_model,
+    parameter_dot,
+    parameter_norm,
+)
 
 
 class Preconditioned(Trainer):
@@ -324,7 +289,7 @@ class Preconditioned(Trainer):
                         )
 
                     w_avg = deepcopy(self.model.state_dict())
-                    w_avg = self.build_model(w_avg, gammas, contributions)
+                    w_avg = build_model(self.gamma_strat, w_avg, gammas, contributions)
 
                     self.model.load_state_dict(w_avg)
 
@@ -562,7 +527,7 @@ class Preconditioned(Trainer):
                 data.to(self.device)
                 # NOTE: rebuilding required for computational graph
                 theta = deepcopy(params)
-                theta = self.build_model(theta, gammas, contributions)
+                theta = build_model(self.gamma_strat, theta, gammas, contributions)
 
                 out, y = functional_call(
                     self.model, (theta, buffers), kwargs=get_data(data)
@@ -625,7 +590,7 @@ class Preconditioned(Trainer):
 
         def loss_fn(gammas):
             theta = deepcopy(params)
-            theta = self.build_model(theta, gammas, contributions)
+            theta = build_model(self.gamma_strat, theta, gammas, contributions)
 
             total_loss = torch.tensor([0.0], device=self.device)
             for data in tqdm(
@@ -669,27 +634,3 @@ class Preconditioned(Trainer):
         path = f"results/{mlflow.active_run().info.run_id}_losses_{global_epoch:03}.npy"  # type: ignore
         np.save(path, Z)
         mlflow.log_artifact(path)
-
-    def build_model(self, theta, gammas, contributions):
-        def weigthing_strategy(a, b, l, i):
-            match self.gamma_strat:
-                case WEIGHTING_STRATEGY.DIRECT:
-                    return a + gammas[i] * b
-                case WEIGHTING_STRATEGY.CLIPPED:
-                    if l >= 4 * 2:  # weight + bias
-                        return (a + gammas[i] * b).detach()
-                    return a + gammas[i] * b
-                case WEIGHTING_STRATEGY.INVERSE:
-                    base = 2
-                    # NOTE: gammas must be positive (>0)
-                    return a + (gammas[i] ** (base**-l)) * b
-
-        for i, delta_w in enumerate(contributions):
-            apply_to_models(
-                a=theta,
-                fun=lambda a, b, l: weigthing_strategy(a, b, l, i),
-                b=delta_w,
-                indexed=True,
-            )
-
-        return theta

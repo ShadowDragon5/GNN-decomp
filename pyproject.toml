@@ -17,6 +17,7 @@ dependencies = [
     "torch",
     "torch-cluster>=1.6.3",
     "torch-geometric",
+    "torch-geometric-temporal>=0.56.2",
     "tqdm",
 ]
 
@@ -24,3 +25,7 @@ dependencies = [
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+
+# https://github.com/microsoft/pyright/blob/main/docs/configuration.md#type-check-rule-overrides
+[tool.pyright]
+reportPrivateImportUsage = false

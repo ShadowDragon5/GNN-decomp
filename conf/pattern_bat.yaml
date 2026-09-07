@@ -1,7 +1,0 @@
-defaults:
-  - pattern_base
-  - _self_
-
-name: PB
-trainer: pre-batched
-partitions: 2

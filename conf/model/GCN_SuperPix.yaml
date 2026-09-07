@@ -1,3 +1,4 @@
+# 100k parameter model
 base: GCN_CG
 hidden_dim: 146
 out_dim: 146

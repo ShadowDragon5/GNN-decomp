@@ -6,9 +6,12 @@ u: false
 # max evaluations for hyperopt search
 max_evals: 1
 description: ""
+init_model: false
 
 # preconditioner epochs (only for 'pre-' pipelines)
 pre_epochs: 40
+# full graph steps after coarse step
+after_steps: 0
 full_epochs: 1
 target: train
 
@@ -16,9 +19,21 @@ target: train
 ASM: false
 gamma_algo: none
 optim: Adam
+optim_params:
+  use_norms: false
+  clamp_momentum: true
+  momentum_type: ema
+  beta: 0.9
+
 ll_resolution: 0
 gamma_lr: 0.01
 gamma_strat: direct
 
 seed: 42
 epochs: 100
+
+# Adagrad
+full_batches: all
+coarse_batches: 0
+coarse_level: 1
+use_coarse_moment: false

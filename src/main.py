@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum, auto
+from functools import partial
 from logging import warning
 from os import makedirs
 from pathlib import Path
@@ -11,29 +12,36 @@ import mlflow
 import networkx as nx
 import numpy as np
 import torch
-from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from mlflow.pytorch import log_model
 from omegaconf import DictConfig
+from torch.utils.data import random_split
 from torch_geometric.data import Data, Dataset
 from torch_geometric.datasets import AirfRANS, GNNBenchmarkDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import to_networkx
+from torch_geometric_temporal import METRLADatasetLoader
 
 from data import wave_data_2D_irrgular
-from models import GCN_CG, GCN_CN, GraphSAGE, MeshGraphNet
+from models import GCN_CG, GCN_CN, DCRNNModel, GraphSAGE, MeshGraphNet
+from models.common import GNN
 from trainers import (
     GAMMA_ALGO,
     WEIGHTING_STRATEGY,
     Accumulating,
     Batched,
+    BatchedAdagrad,
     MGN_trainer,
     Preconditioned,
+    Preconditioned_Adagrad,
     Trainer,
 )
 from utils import (
+    METRLADataset,
+    coarsen_graph_random,
     get_data,
+    init_weights,
     normalization_transform,
-    partition_data_points,
+    partition_data_points_morton,
     partition_transform_global,
     position_transform,
 )
@@ -44,14 +52,17 @@ MODELS = {
     # "GCN_WikiCS": lambda **kwargs: GCN_CG(hidden_dim=120, out_dim=120, **kwargs),
     "MeshGraphNet": MeshGraphNet,
     "GraphSAGE": GraphSAGE,
+    "DCRNNModel": DCRNNModel,
 }
 
 TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "batched": Batched,  # baseline
+    "batch-adagrad": BatchedAdagrad,  # baseline
     "accumulating": Accumulating,  # baseline with gradient accumulation
     "pre-accumulating": Preconditioned,
     "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
     "mgn-batched": MGN_trainer,  # MGN baseline
+    "pre-adagrad": Preconditioned_Adagrad,
 }
 
 SCHEDULERS = {
@@ -65,6 +76,12 @@ SCHEDULERS = {
         optim,
         max_lr=lr,
         total_steps=total_steps,
+    ),
+    "DCRNNModel": lambda optim, *_: torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optim,
+        mode="min",
+        factor=0.5,
+        patience=5,
     ),
 }
 
@@ -89,6 +106,7 @@ class DS(StrEnum):
     PATTERN = auto()
     Wave2D = auto()
     AirfRANS = auto()
+    METR_LA = auto()
 
 
 # Normalization variables
@@ -214,7 +232,13 @@ def load_data(name: DS, reload: bool, root: Path) -> tuple[Dataset, Dataset, Dat
 
             testset = validset
 
-    return trainset, validset, testset
+        case DS.METR_LA:
+            root_str = str(root / "METR_LA")
+            dataset = METRLADataset(METRLADatasetLoader(root_str).get_dataset())
+
+            trainset, validset, testset = random_split(dataset, [0.6, 0.2, 0.2])
+
+    return trainset, validset, testset  # type: ignore
 
 
 @hydra.main(version_base=None, config_path="../conf")
@@ -283,7 +307,7 @@ def main(cfg: DictConfig):
                     ),
                     task="scarce",
                     train=True,
-                    pre_transform=lambda data: partition_data_points(
+                    pre_transform=lambda data: partition_data_points_morton(
                         position_transform(
                             normalization_transform(data, mean_x, std_x, mean_y, std_y)
                         ),
@@ -307,10 +331,18 @@ def main(cfg: DictConfig):
                     ),
                     force_reload=cfg.u,
                 )
+
+            case DS.METR_LA:
+                root_str = str(dataset_dir / "METR_LA")
+                partset = METRLADataset(
+                    METRLADatasetLoader(root_str).get_dataset(),
+                    num_parts=cfg.partitions,
+                )
+
         assert partset is not None
 
         part_trainloader = DataLoader(
-            partset,
+            partset,  # type: ignore
             batch_size=cfg.dev.batch,
             shuffle=True,
             # NOTE: results in x_0_batch
@@ -370,27 +402,20 @@ def main(cfg: DictConfig):
                     break
             return
 
-    # learning rates and weight decays
-    # LRnWDs = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 5e-6, 1e-6]
-    search_space = {
+    trainer_params = {
         "lr": cfg.model.lr,
         "wd": cfg.model.wd,
-        **(
-            {
-                "pre_epochs": cfg.pre_epochs,
-                "full_epochs": cfg.full_epochs,
-                # "pre_epochs": hp.choice("pre_epochs", [10, 20, 30, 40]),
-                # "full_epochs": hp.choice("full_epochs", [1, 3, 5]),
-                "pre_lr": cfg.model.pre_lr,
-                # if args.pre_lr is not None
-                # else hp.choice("pre_lr", LRnWDs),
-                "pre_wd": cfg.model.pre_wd,
-                # if cfg.pre_wd is not None
-                # else hp.choice("pre_wd", LRnWDs),
-            }
-            if has_pre
-            else {}
-        ),
+        "pre_epochs": cfg.pre_epochs,
+        # "full_epochs": cfg.full_epochs,
+        "full_batches": cfg.full_batches,
+        "coarse_batches": cfg.coarse_batches,
+        "coarse_level": cfg.coarse_level,
+        "coarse_fn": partial(coarsen_graph_random, radius=0.1),
+        "after_steps": cfg.after_steps,
+        "use_coarse_moment": cfg.use_coarse_moment,
+        "pre_lr": cfg.model.pre_lr,
+        "pre_wd": cfg.model.pre_wd,
+        "optim_params": cfg.optim_params,
     }
 
     name = ""
@@ -403,82 +428,78 @@ def main(cfg: DictConfig):
             name += "MS_"  # Multiplicative
     name += f"P{cfg.partitions}_S{cfg.seed}_{cfg.trainer}"
 
-    def objective(trainer_params):
-        n_classes = None
-        if cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN]:
-            n_classes = trainset.num_classes
-
-        model = MODELS[cfg.model.base](
-            in_dim=trainset.num_features,
-            hidden_dim=cfg.model.hidden_dim,
-            out_dim=cfg.model.out_dim,
-            edge_dim=3,
-            num_steps=10,
-            device=device,
-            dropout=cfg.model.dropout,
-            n_classes=n_classes,
-        )
-
-        with mlflow.start_run(
-            run_name=f"{cfg.dataset}_{name}",
-            description=cfg.description,
-        ):
-            mlflow.log_params(
-                {
-                    "seed": cfg.seed,
-                    "trainer": cfg.trainer,
-                    "optimizer": cfg.optim,
-                    "model": cfg.model.base,
-                    "hidden_dim": cfg.model.hidden_dim,
-                    "dataset": cfg.dataset,
-                    "batch": cfg.dev.batch,
-                    "epochs": cfg.epochs,
-                    "additive": cfg.ASM,
-                    "line search": cfg.gamma_algo,
-                    "gamma opt. lr": cfg.gamma_lr,
-                    "gamma weighting": cfg.gamma_strat,
-                    "partitions": cfg.partitions,
-                    "optim target": cfg.target,
-                    **trainer_params,
-                }
-            )
-            trainer = TRAINERS[cfg.trainer](
-                name=name,
-                model=model,
-                trainloader=trainloader,
-                validloader=validloader,
-                testloader=testloader,
-                device=device,
-                quiet=cfg.dev.q,
-                part_trainloader=part_trainloader,
-                num_parts=cfg.partitions,
-                ASM=cfg.ASM,
-                epochs=cfg.epochs,
-                gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
-                target=cfg.target,
-                need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
-                optim=OPTIM[cfg.optim],
-                ll_resolution=cfg.ll_resolution,
-                gamma_lr=cfg.gamma_lr,
-                gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
-                scheduler=SCHEDULERS[cfg.model.base],
-                **trainer_params,
-            )
-            loss = trainer.run()
-
-            log_model(trainer.model, "model")
-        return {"loss": loss, "status": STATUS_OK}
-
     mlflow.set_experiment("GNN_" + datetime.now().strftime("%yw%V"))
-    trials = Trials()
-    fmin(
-        fn=objective,
-        space=search_space,
-        algo=tpe.suggest,
-        max_evals=cfg.max_evals,
-        trials=trials,
-        show_progressbar=False,
+
+    n_classes = (
+        trainset.num_classes
+        if cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN]
+        else None
     )
+
+    item = next(iter(trainloader))
+    model: GNN = MODELS[cfg.model.base](
+        in_dim=item.x.shape[1],
+        hidden_dim=cfg.model.hidden_dim,
+        out_dim=cfg.model.out_dim,
+        edge_dim=3,
+        num_steps=10,
+        device=device,
+        dropout=cfg.model.dropout,
+        n_classes=n_classes,
+    )
+
+    if cfg.init_model:
+        model.apply(init_weights)
+
+    with mlflow.start_run(
+        run_name=f"{cfg.dataset}_{name}",
+        description=cfg.description,
+    ):
+        mlflow.log_params(
+            {
+                "seed": cfg.seed,
+                "trainer": cfg.trainer,
+                "optimizer": cfg.optim,
+                "model": cfg.model.base,
+                "model initialization": cfg.init_model,
+                "hidden_dim": cfg.model.hidden_dim,
+                "dataset": cfg.dataset,
+                "batch": cfg.dev.batch,
+                "epochs": cfg.epochs,
+                "additive": cfg.ASM,
+                "line search": cfg.gamma_algo,
+                "gamma opt. lr": cfg.gamma_lr,
+                "gamma weighting": cfg.gamma_strat,
+                "partitions": cfg.partitions,
+                "optim target": cfg.target,
+                **trainer_params,
+            }
+        )
+        trainer = TRAINERS[cfg.trainer](
+            name=name,
+            model=model,
+            trainloader=trainloader,
+            validloader=validloader,
+            testloader=testloader,
+            device=device,
+            quiet=cfg.dev.q,
+            part_trainloader=part_trainloader,
+            num_parts=cfg.partitions,
+            ASM=cfg.ASM,
+            epochs=cfg.epochs,
+            gamma_algo=GAMMA_ALGO(cfg.gamma_algo),
+            target=cfg.target,
+            need_acc=cfg.dataset in [DS.CIFAR10, DS.MNIST, DS.PATTERN],
+            optim=OPTIM[cfg.optim],
+            ll_resolution=cfg.ll_resolution,
+            gamma_lr=cfg.gamma_lr,
+            gamma_strat=WEIGHTING_STRATEGY(cfg.gamma_strat),
+            scheduler=SCHEDULERS.get(cfg.model.base),
+            **trainer_params,
+        )
+        trainer.run()
+
+        log_model(trainer.model, "model")
 
 
 if __name__ == "__main__":

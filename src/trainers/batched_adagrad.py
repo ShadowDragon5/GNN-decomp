@@ -1,32 +1,26 @@
 from collections import defaultdict
 
 import mlflow
-import torch
 from tqdm import tqdm
 
+from optimizers.dd_adagrad import DD_Adagrad
 from utils import get_data
 
 from .common import Trainer
 
 
-class Batched(Trainer):
-    """
-    Mini batches of full graphs.
-    """
+class BatchedAdagrad(Trainer):
+    def __init__(
+        self,
+        optim_params: dict,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.optim_params = optim_params
 
     def run(self) -> float:
         self.model.to(self.device)
-        optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=self.lr,
-            weight_decay=self.wd,
-        )
-
-        scheduler = self.scheduler(
-            optimizer,
-            self.lr,
-            len(self.trainloader) * self.epochs,
-        )
+        optimizer = DD_Adagrad(self.model.parameters(), **self.optim_params)
 
         k_iter = 0
         valid_loss = defaultdict(float)
@@ -43,15 +37,14 @@ class Batched(Trainer):
             ):
                 data.to(self.device)
 
-                out, y = self.model(**get_data(data))
-                loss = self.model.loss(out, y)["loss"]
+                def closure():
+                    out, y = self.model(**get_data(data))
+                    return self.model.loss(out, y)["loss"]
+
+                loss = optimizer.step(closure)
 
                 train_loss += loss.detach().item()
 
-                loss.backward()
-                optimizer.step()
-                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
-                    scheduler.step()
                 optimizer.zero_grad()
                 k_iter += 1
 
@@ -59,8 +52,6 @@ class Batched(Trainer):
 
             # Validation
             valid_loss = self.validate(self.model)
-            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                scheduler.step(valid_loss["loss"])
 
             if not self.quiet:
                 print(f"Epoch: {epoch:03} | Valid Loss: {valid_loss['loss']}")
@@ -68,7 +59,6 @@ class Batched(Trainer):
             mlflow.log_metrics(
                 {
                     "train/loss": train_loss,
-                    "train/lr": scheduler.get_last_lr()[0],
                     **{f"validate/{k}": v for k, v in valid_loss.items()},
                 },
                 step=k_iter,

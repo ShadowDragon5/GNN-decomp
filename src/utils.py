@@ -2,9 +2,13 @@ import re
 
 import torch
 from sklearn.cluster import spectral_clustering
+from torch.utils.data import Dataset
 from torch_geometric.data import Data
-from torch_geometric.nn import radius_graph
-from torch_geometric.utils import to_scipy_sparse_matrix
+from torch_geometric.nn import graclus, radius_graph
+from torch_geometric.nn.pool import avg_pool
+from torch_geometric.nn.pool.avg_pool import _avg_pool_x
+from torch_geometric.nn.pool.select.topk import topk
+from torch_geometric.utils import subgraph, to_scipy_sparse_matrix
 
 from graclus import graclus_kway
 
@@ -37,6 +41,61 @@ class PartitionedData(Data):
 
 
 torch.serialization.add_safe_globals([PartitionedData])
+
+
+class METRLADataset(Dataset):
+    def __init__(self, temporal_dataset, num_parts=1):
+        self.snapshots = list(temporal_dataset)
+
+        self.partitions = (
+            None
+            if num_parts == 1
+            else self._partition_graph(
+                self.snapshots[0],
+                num_parts,
+            )
+        )
+
+    def __len__(self):
+        return len(self.snapshots)
+
+    def __getitem__(self, idx):
+        data = self.snapshots[idx]
+        data.num_nodes = data.x.shape[0]
+
+        if self.partitions is None:
+            return data
+
+        return self._apply_partition(
+            data,
+            self.partitions,
+        )
+
+    @staticmethod
+    def _partition_graph(data, num_parts):
+        # Spectral
+        # A = to_scipy_sparse_matrix(data.edge_index, num_nodes=data.x.shape[0])
+        # labels = spectral_clustering(A, n_clusters=num_parts)
+
+        # Graclus
+        data.num_nodes = data.x.shape[0]
+        labels = graclus_kway(data, num_parts)
+
+        return [(labels == i).detach().clone() for i in range(num_parts)]
+
+    @staticmethod
+    def _apply_partition(data, partitions):
+        subgraphs = {}
+
+        for i, mask in enumerate(partitions):
+            G = data.subgraph(mask)
+
+            subgraphs[f"x_{i}"] = G.x
+            subgraphs[f"edge_index_{i}"] = G.edge_index
+            subgraphs[f"edge_attr_{i}"] = G.edge_attr
+            subgraphs[f"y_{i}"] = G.y
+
+        return PartitionedData(**subgraphs)
 
 
 def get_data(
@@ -75,6 +134,13 @@ def get_data(
     # sample points
     n = pos.size(0)
     sampleN = 32000
+
+    if isinstance(data, PartitionedData):
+        for j in range(6):
+            if data.get("x", j, device) is None:
+                break
+        sampleN //= j  # type: ignore
+
     if n <= sampleN:
         idx = torch.arange(n, device=device)
     else:
@@ -94,6 +160,77 @@ def get_data(
             for k in ["x", "y"]
         },
     }
+
+
+def coarsen_graph_avg(data: Data, level=1) -> Data:
+    data.to("cpu")  # HACK: graclus hangs on GPU
+    for _ in range(level):
+        if data.edge_index is None:
+            data = Data(**get_data(data))
+        cluster = graclus(data.edge_index, num_nodes=data.num_nodes)  # type: ignore
+        # reindex cluster ids
+        _, cluster = torch.unique(cluster, return_inverse=True)
+
+        # pool labels if they are per node
+        assert isinstance(data.y, torch.Tensor)
+        y = (
+            data.y
+            if data.y.shape[0] != data.x.shape[0]  # type: ignore
+            else _avg_pool_x(cluster, data.y)
+        )
+        data = avg_pool(cluster, data)
+        data.y = y
+
+    return data
+
+
+def coarsen_graph_random(data: Data, level=1, radius=0.05) -> Data:
+    assert data.num_nodes is not None
+    assert isinstance(data.x, torch.Tensor)
+    assert isinstance(data.y, torch.Tensor)
+
+    # AirfRANS
+    if data.edge_index is None:
+        assert data.pos is not None
+        n = 32000 // (2**level)
+        idx = torch.multinomial(torch.ones(data.num_nodes, device=data.x.device), n)
+        edge_index = radius_graph(
+            x=data.pos[idx],
+            r=radius,
+            loop=True,
+            max_num_neighbors=64,
+        )
+        edge_attr = None
+        new_y = data.y[idx]
+
+    else:
+        if data.batch is not None:
+            scores = torch.rand(data.num_nodes, device=data.x.device)
+            idx = topk(scores, ratio=1 / (2**level), batch=data.batch)
+            n = idx.shape[0]
+        else:
+            n = data.num_nodes // (2**level)
+            idx = torch.randperm(data.num_nodes, device=data.x.device)[:n]
+
+        edge_index, edge_attr = subgraph(
+            subset=idx,
+            edge_index=data.edge_index,
+            edge_attr=getattr(data, "edge_attr", None),
+            relabel_nodes=True,
+        )
+        if data.y.dim() == 1:
+            new_y = data.y
+        else:
+            new_y = data.y[idx]
+
+    return Data(
+        num_nodes=n,
+        edge_index=edge_index,
+        edge_attr=edge_attr,
+        x=data.x[idx],
+        y=new_y,
+        batch=data.batch[idx],  # type: ignore
+    )
 
 
 def position_transform(data: Data) -> Data:
@@ -121,12 +258,6 @@ def normalization_transform(data: Data, mean_x, std_x, mean_y, std_y) -> Data:
         edge_index=data.edge_index,
         batch=data.batch,
     )
-
-
-def part_to_data(x, y, A) -> Data:
-    adj = torch.transpose(A, -2, -1)
-    index = adj.nonzero(as_tuple=True)
-    return Data(x=x, y=y, edge_index=torch.stack(index, 0))
 
 
 def partition_transform_global(data: Data, num_parts: int = 2):
@@ -158,7 +289,7 @@ def partition_transform_global(data: Data, num_parts: int = 2):
     return PartitionedData(batch=data.batch, **subgraphs)
 
 
-def partition_data_points(data: Data, num_parts: int = 2):
+def partition_data_points_graclus(data: Data, num_parts: int = 2):
     assert data.x is not None
     assert data.pos is not None
 
@@ -180,3 +311,64 @@ def partition_data_points(data: Data, num_parts: int = 2):
         subgraphs[f"y_{i}"] = G.y
 
     return PartitionedData(batch=data.batch, **subgraphs)
+
+
+def morton_partition(pos, num_parts):
+    N = pos.size(0)
+
+    mins = pos.min(0).values
+    maxs = pos.max(0).values
+
+    x = ((pos[:, 0] - mins[0]) / (maxs[0] - mins[0] + 1e-12) * 1024).long()
+    y = ((pos[:, 1] - mins[1]) / (maxs[1] - mins[1] + 1e-12) * 1024).long()
+
+    code = torch.zeros_like(x)
+    for i in range(10):
+        code |= ((x >> i) & 1) << (2 * i)
+        code |= ((y >> i) & 1) << (2 * i + 1)
+
+    perm = torch.argsort(code)
+
+    # balanced slicing
+    splits = torch.linspace(0, N, num_parts + 1).long()
+
+    labels = torch.empty(N, dtype=torch.long, device=pos.device)
+
+    for i in range(num_parts):
+        labels[perm[splits[i] : splits[i + 1]]] = i
+
+    return labels
+
+
+def partition_data_points_morton(data: Data, num_parts: int = 2):
+    assert data.x is not None
+    assert data.pos is not None
+
+    clusters = morton_partition(data.pos, num_parts)
+
+    subgraphs = dict()
+    for i in range(num_parts):
+        G = data.subgraph(clusters == i)
+        subgraphs[f"x_{i}"] = G.x
+        subgraphs[f"pos_{i}"] = G.pos
+        subgraphs[f"y_{i}"] = G.y
+
+    return PartitionedData(batch=data.batch, **subgraphs)
+
+
+def init_weights(m: torch.nn.Module):
+    """Performs weight initialization.
+
+    Args:
+        m: PyTorch module
+
+    """
+    if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
+        m.weight.data.fill_(1.0)
+        m.bias.data.zero_()
+    elif isinstance(m, torch.nn.Linear):
+        m.weight.data = torch.nn.init.xavier_uniform_(
+            m.weight.data, gain=torch.nn.init.calculate_gain("relu")
+        )
+        if m.bias is not None:
+            m.bias.data.zero_()
