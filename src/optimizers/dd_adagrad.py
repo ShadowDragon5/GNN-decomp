@@ -25,21 +25,16 @@ class DD_Adagrad(torch.optim.Optimizer):
         k2=2.0,
         beta=0.9,  # momentum
         momentum_type=MOMENTUM.EMA,
-        clamp_momentum=False,
-        use_norms=False,
         device=None,
     ) -> None:
         self.lr = lr
-        self.use_norms = use_norms
         self.momentum_type = momentum_type
-        self.clamp_momentum = clamp_momentum
         self.k1 = k1
         self.k2 = k2
+        self.adjust = False
 
         w_lk = None
         moment = None
-        theta1 = 0.0
-        theta2 = torch.inf
 
         if higher_state is not None:
             gr = higher_state["param_groups"][0]
@@ -49,17 +44,14 @@ class DD_Adagrad(torch.optim.Optimizer):
             )
             w_lk = torch.clone(gr["w_lk"])
             moment = torch.clone(gr["moment"])
-            theta1, theta2 = self.compute_thetas(gradient, w_lk)
+            self.adjust = True
 
         defaults = {
-            "theta1": theta1,
-            "theta2": theta2,
             "gradient": None,
             "beta": beta,
         }
         super().__init__(params, defaults)
 
-        # TODO: look into parameter groups
         if len(self.param_groups) != 1:
             raise ValueError(
                 "DD Adagrad doesn't support per-parameter options (parameter groups)"
@@ -68,10 +60,11 @@ class DD_Adagrad(torch.optim.Optimizer):
         group = self.param_groups[0]
         self._params = group["params"]
         group["first_iter"] = True
-        # NOTE: this requires the model to be moved to device before calling this constructor
+        # FIXME: this requires the model to be moved to device before calling this constructor
         self.device = device if device is not None else self._params[0].device
 
         flat_params = flatten(self._params)
+        # TODO: expose 0.01 as a parameter
         group["w_lk"] = (
             w_lk
             if w_lk is not None
@@ -83,22 +76,6 @@ class DD_Adagrad(torch.optim.Optimizer):
             if moment is not None
             else torch.zeros_like(flat_params, device=self.device)
         )
-
-    @torch.no_grad()
-    def compute_thetas(self, gradient: Tensor, w_lk: Tensor):
-
-        delta = gradient.abs() / w_lk
-
-        # Prolongation
-        s = torch.clamp(-gradient, -delta, delta)
-
-        # NOTE: not used
-        # theta1 = self.k1 * (gradient @ delta).abs().item()
-        theta1 = 0.0
-
-        theta2 = self.k2 * s.norm().item()
-
-        return theta1, theta2
 
     @torch.no_grad()
     def update_weights(self, closure: Callable) -> None:
@@ -131,7 +108,6 @@ class DD_Adagrad(torch.optim.Optimizer):
         """
         group = self.param_groups[0]
         w_lk = group["w_lk"].to(self.device)
-        theta2 = group["theta2"]
         beta = group["beta"]
 
         with torch.enable_grad():
@@ -146,17 +122,11 @@ class DD_Adagrad(torch.optim.Optimizer):
         group["gradient"] = grad_flat
 
         w_new = (grad_flat**2 + w_lk**2).sqrt()
+
+        if group["first_iter"] and self.adjust:
+            w_new = torch.max(w_new, w_lk)
+
         delta = grad_flat.abs() / w_new
-
-        if theta2 < torch.inf and group["first_iter"]:
-            if self.use_norms:
-                norm_delta = delta.norm()
-                w_new *= max(1, norm_delta / theta2)
-                delta *= min(1, theta2 / norm_delta)
-            else:
-                w_new = torch.max(w_new, w_lk)
-                delta = grad_flat.abs() / w_new
-
         group["w_lk"] = w_new
 
         # Prolongation
@@ -188,8 +158,7 @@ class DD_Adagrad(torch.optim.Optimizer):
             case MOMENTUM.EMA:
                 moment.mul_(beta).add_(s_lk, alpha=lr * (1 - beta))
 
-        if self.clamp_momentum:
-            moment.clamp_(-delta, delta)
+        moment.clamp_(-delta, delta)
 
         # apply step
         splits = torch.split(moment, [p.numel() for p in self._params])

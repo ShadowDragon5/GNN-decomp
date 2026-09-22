@@ -30,6 +30,7 @@ from trainers import (
     Accumulating,
     Batched,
     BatchedAdagrad,
+    Dist_Adagrad,
     MGN_trainer,
     Preconditioned,
     Preconditioned_Adagrad,
@@ -63,6 +64,7 @@ TRAINERS: dict[str, Type[Trainer] | Callable[..., Trainer]] = {
     "pre-batched": lambda **kwargs: Preconditioned(batched=True, **kwargs),
     "mgn-batched": MGN_trainer,  # MGN baseline
     "pre-adagrad": Preconditioned_Adagrad,
+    "dist-adagrad": Dist_Adagrad,
 }
 
 SCHEDULERS = {
@@ -246,10 +248,10 @@ def main(cfg: DictConfig):
     makedirs("results", exist_ok=True)
     dataset_dir = Path(cfg.dev.data_dir)
 
-    if not torch.cuda.is_available():
-        warning("No CUDA detected.")
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.accelerator.current_accelerator(True)
+    if device is None:
+        warning("No accelerator detected.")
+        device = torch.device("cpu")
 
     # setting seeds
     np.random.seed(cfg.seed)

@@ -5,7 +5,6 @@ defaults:
 name: A
 trainer: pre-adagrad
 full_batches: all
-use_norms: false
 partitions: 2
 
 ASM: true

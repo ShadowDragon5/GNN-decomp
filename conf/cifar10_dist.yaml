@@ -1,0 +1,15 @@
+defaults:
+  - cifar10_base
+  - _self_
+
+name: Dist
+trainer: dist-adagrad
+partitions: 2
+coarse_level: 1
+full_batches: 10
+coarse_batches: 352
+after_steps: 10
+pre_epochs: 352
+
+ASM: true
+gamma_algo: none
