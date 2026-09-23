@@ -89,6 +89,8 @@ class Dist_Adagrad(Trainer):
             warning("Allocated more processors than partitions.")
 
         self.rank = dist.get_rank()
+        if self.device.type == "cuda":
+            torch.accelerator.set_device_index(self.rank)
 
     def precondition(
         self,
@@ -102,7 +104,7 @@ class Dist_Adagrad(Trainer):
         epoch: global epoch for logging
         returns: difference in model weights after the preconditioning
         """
-        model = deepcopy(model_g).to(f"{self.device}:{i % self.world_size}")
+        model = deepcopy(model_g).to(self.device)
         weights_0 = deepcopy(model_g.state_dict())
 
         optimizer = DD_Adagrad(model.parameters(), higher_state, **self.optim_params)

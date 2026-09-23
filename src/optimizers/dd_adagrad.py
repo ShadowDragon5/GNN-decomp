@@ -66,13 +66,13 @@ class DD_Adagrad(torch.optim.Optimizer):
         flat_params = flatten(self._params)
         # TODO: expose 0.01 as a parameter
         group["w_lk"] = (
-            w_lk
+            w_lk.to(self.device)
             if w_lk is not None
             else torch.full_like(flat_params, 0.01, device=self.device)
         )
 
         group["moment"] = (
-            moment
+            moment.to(self.device)
             if moment is not None
             else torch.zeros_like(flat_params, device=self.device)
         )
