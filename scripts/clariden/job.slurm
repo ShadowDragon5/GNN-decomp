@@ -1,19 +1,19 @@
-#!/bin/bash
-#SBATCH --partition=gpu_p2
+#!/bin/bash -l
+#SBATCH --account="prep45"
 #SBATCH --nodes=1                   # number of nodes
-#SBATCH --cpus-per-task=3           # number of CPUs per task (1/8 of 24 cores on gpu_p2)
-#SBATCH --hint=nomultithread        # hyperthreading disabled
-#SBATCH --time=20:00:00             # maximum execution time requested (HH:MM:SS)
+#SBATCH --gpus-per-task=1           # 1 GPU per MPI rank
+#SBATCH --cpus-per-task=3
+#SBATCH --partition=normal
+#SBATCH --hint=nomultithread
+#SBATCH --time=12:00:00             # maximum execution time requested (HH:MM:SS)
+#SBATCH --environment=gnndecomp
 
 
-module purge
-
-# jean-zay NCCL version: 2.27.3
+# Container NCCL version: 2.30.7-1
 export OMP_NUM_THREADS=$SLURM_NTASKS_PER_NODE
 export NCCL_DEBUG=INFO
 export NCCL_IB_CUDA_SUPPORT=1
-# run ibstat to get interfaces
-# export NCCL_IB_HCA=ipogif0
+export SLURM_MPI_TYPE=pmix
 
 # module load pytorch-gpu/py3/2.6.0
 source .venv/bin/activate
