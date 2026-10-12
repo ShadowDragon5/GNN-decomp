@@ -71,8 +71,6 @@ class Preconditioned_Adagrad(Trainer):
         self.gamma_strat = gamma_strat
         self.optim_params = optim_params
 
-        # self.pre_moment = [None] * num_parts
-
         if target == "train":
             self.targetloader = self.trainloader
         else:
@@ -94,9 +92,6 @@ class Preconditioned_Adagrad(Trainer):
         weights_0 = deepcopy(model_g.state_dict())
 
         optimizer = DD_Adagrad(model.parameters(), higher_state, **self.optim_params)
-
-        # if self.pre_moment[i] is not None:
-        #     optimizer.param_groups[0]["moment"] = torch.clone(self.pre_moment[i])
 
         model.train()
 
@@ -147,6 +142,7 @@ class Preconditioned_Adagrad(Trainer):
             optimizer.zero_grad()
 
             # skip full graph
+            # NOTE: increases compute time but doesn't increase step count -> each step will be more expensive
             if full_batches == 0:
                 # update top level weights
                 def grad_closure():
@@ -181,11 +177,6 @@ class Preconditioned_Adagrad(Trainer):
 
                     if i >= full_batches:
                         break
-
-            # mlflow.log_metrics(
-            #     {f"validate/scaled_{k}": v for k, v in valid_loss.items()},
-            #     step=scaled_epochs - 1,
-            # )
 
             # Coarse step
             if self.coarse_batches > 0:
@@ -306,15 +297,6 @@ class Preconditioned_Adagrad(Trainer):
             w_avg = build_model(self.gamma_strat, w_avg, gammas, contributions)
 
             self.model.load_state_dict(w_avg)
-
-            # scaled_epochs += int(ceil(self.pre_epochs / self.num_parts))
-
-            # LOGGING
-            vloss = self.validate(self.model)  # model.eval()
-            mlflow.log_metrics(
-                {f"after_pre/{k}": v for k, v in vloss.items()},
-                step=epoch,
-            )
 
         return valid_loss["loss"]
 

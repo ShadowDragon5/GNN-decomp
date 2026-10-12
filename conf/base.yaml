@@ -9,7 +9,7 @@ description: ""
 init_model: false
 
 # preconditioner epochs (only for 'pre-' pipelines)
-pre_epochs: 40
+pre_epochs: 352
 # full graph steps after coarse step
 after_steps: 0
 full_epochs: 1

@@ -12,8 +12,8 @@ run_job() {
 
 	# --ntasks-per-node - number of MPI tasks per node (= number of GPUs per node)
 	sbatch --job-name="${NAME}" --error="${OUT_PREF}err_${NAME}" --output="${OUT_PREF}out_${NAME}" \
-		--ntasks-per-node="$GPUS" \
-		"$SCRIPT_PATH/job.slurm" dev=jean_zay "$@"
+		--ntasks-per-node=1 --gpus-per-task="$GPUS" \
+		"$SCRIPT_PATH/job.slurm" $GPUS dev=jean_zay "$@"
 }
 
 for seed in 12 35 41 95;

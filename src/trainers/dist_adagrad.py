@@ -283,8 +283,8 @@ class Dist_Adagrad(Trainer):
 
             # DD step
             with torch.no_grad():
-                for p in self.model.parameters():
-                    dist.broadcast(p, src=0)
+                for tens in self.model.state_dict().values():
+                    dist.broadcast(tens, src=0)
 
             if self.rank == 0:
                 higher_state = optimizer.state_dict()
@@ -294,34 +294,30 @@ class Dist_Adagrad(Trainer):
             objects = [higher_state]
             dist.broadcast_object_list(objects, src=0)
 
-            # # in case there are more partitions than processes
-            # # WIP: would need to communicate all contributions
-            # for i in range(0, self.num_parts, self.world_size):
-            #     part_i = i + self.rank
-            #     if part_i < self.num_parts:
-            #         self.precondition(
-            #             model_g=self.model,
-            #             higher_state=objects[0],  # type: ignore
-            #             i=part_i,
-            #             epoch=epoch,
-            #         )
-
-            self.precondition(
+            contribution = self.precondition(
                 model_g=self.model,
                 higher_state=objects[0],  # type: ignore
                 i=self.rank,
                 epoch=epoch,
             )
 
-            k_iter += int(ceil(self.pre_steps / self.num_parts))
-
-            # Contribution combination
-            w_avg = deepcopy(self.model.state_dict())
             with torch.no_grad():
-                for p in w_avg.values():
-                    if p.data.dtype == torch.float:
+                for p in contribution.values():
+                    if torch.is_floating_point(p):
                         dist.reduce(p, op=dist.ReduceOp.AVG, dst=0)
 
-            self.model.load_state_dict(w_avg)
+            k_iter += int(ceil(self.pre_steps / self.num_parts))
+
+            if self.rank == 0:
+                # Contribution combination
+                with torch.no_grad():
+                    w_avg = deepcopy(self.model.state_dict())
+                    apply_to_models(
+                        a=w_avg,
+                        fun=lambda a, b: a + b,
+                        b=contribution,
+                    )
+
+                self.model.load_state_dict(w_avg)
 
         return valid_loss["loss"]
